@@ -128,30 +128,23 @@ class Blackjack(commands.Cog):
             path = os.path.join(card_dir, filename)
             try:
                 images.append(Image.open(path).convert('RGBA'))
-            except Exception as e:
+            except Exception:
                 images.append(Image.new('RGBA', (100, 150), (0, 128, 0, 255)))
         return images
 
     def center(self, *hands):
-        """Creates blackjack table with cards placed"""
+        # Creates blackjack table with cards placed
         from PIL import Image
         import os
-        # Find absolute path to table.png
         table_path = os.path.join(os.path.dirname(__file__), '..', 'modules', 'table.png')
-        bg: Image.Image = Image.open(table_path).convert('RGBA')
+        bg = Image.open(table_path).convert('RGBA')
         bg_center_x = bg.size[0] // 2
         bg_center_y = bg.size[1] // 2
-
         if not hands or not hands[0]:
             return bg
-
-        img_w = hands[0][0].size[0]
-        img_h = hands[0][0].size[1]
-
-        # Vertical centering for all hands
-        start_y = bg_center_y - (((len(hands)*img_h) + ((len(hands) - 1) * 15)) // 2)
+        img_w, img_h = hands[0][0].size
+        start_y = bg_center_y - (((len(hands)*img_h) + ((len(hands) - 1) * 15) ) // 2)
         for hand in hands:
-            # Horizontal centering for each hand
             start_x = bg_center_x - (((len(hand)*img_w) + ((len(hand) - 1) * 10)) // 2)
             for card in hand:
                 bg.alpha_composite(card, (start_x, start_y))
@@ -163,18 +156,19 @@ class Blackjack(commands.Cog):
         self.economy = Economy()
         self.active_games = {}
 
-    @nextcord.slash_command(description="Play a simple game of blackjack. Bet must be greater than $0")
-    async def blackjack(self, interaction: nextcord.Interaction, bet: int = 100):
+    @nextcord.slash_command(description="Play a simple game of blackjack. Bet must be greater than $0", guild_ids=[629027778347532298])
+    async def blackjack(self, interaction: nextcord.Interaction):
         await interaction.response.send_message("Game started! ✅", ephemeral=True)
         thread = await interaction.channel.create_thread(
             name=f"Blackjack - {interaction.user.display_name}",
             type=nextcord.ChannelType.public_thread
         )
-        view = BettingView(self, interaction.user, bet, thread)
+        default_bet = 100
+        view = BettingView(self, interaction.user, default_bet, thread)
         balance = self.economy.get_entry(interaction.user.id)[1]
         embed = make_embed(
             title="Set your bet",
-            description=f"Current bet: ${bet}\nWallet: ${balance}"
+            description=f"Current bet: ${default_bet}\nWallet: ${balance}"
         )
         msg = await thread.send(embed=embed, view=view)
         view.bet_message = msg

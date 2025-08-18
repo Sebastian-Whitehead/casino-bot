@@ -14,10 +14,13 @@ intents.message_content = True  # Enable if your bot needs to read message conte
 client = commands.Bot(
     command_prefix=PREFIX,
     owner_ids=OWNER_IDS,
-    intents=intents
+    intents=intents,
+    help_command=None
 )
 
-client.remove_command('help')
+@client.event
+async def on_ready():
+    print(f'Logged in as {client.user}')
 
 for filename in os.listdir(COG_FOLDER):
     if filename.endswith('.py'):
