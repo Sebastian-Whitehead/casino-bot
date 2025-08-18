@@ -3,8 +3,8 @@ import os
 import random
 from typing import List, Tuple, Union
 
-import discord
-from discord.ext import commands
+import nextcord as discord
+from nextcord.ext import commands
 from modules.card import Card
 from modules.economy import Economy
 from modules.helpers import *

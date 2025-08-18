@@ -1,5 +1,5 @@
-import discord
-from discord.ext import commands
+import nextcord as discord
+from nextcord.ext import commands
 from modules.economy import Economy
 from modules.helpers import *
 
@@ -47,10 +47,9 @@ class GamblingHelpers(commands.Cog, name='General'):
             description=(
                 '**${:,}**'.format(profile[1]) +
                 '\n**{:,}** credits'.format(profile[2])
-            ),
-            footer=discord.Embed.Empty
+            )
         )
-        embed.set_thumbnail(url=user.avatar_url)
+        embed.set_thumbnail(url=user.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(

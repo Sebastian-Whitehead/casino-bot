@@ -1,7 +1,7 @@
 import random
 
-from discord.ext import commands
-from discord.ext.commands.errors import BadArgument
+from nextcord.ext import commands
+from nextcord.ext.commands.errors import BadArgument
 from modules.economy import Economy
 from modules.helpers import DEFAULT_BET, InsufficientFundsException
 

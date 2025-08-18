@@ -1,5 +1,5 @@
-import discord
-from discord.ext import commands
+import nextcord as discord
+from nextcord.ext import commands
 from discord.ext.commands.errors import *
 from modules.helpers import PREFIX, InsufficientFundsException
 
@@ -20,6 +20,11 @@ class Handlers(commands.Cog, name='handlers'):
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error):
+        import traceback
+        import sys
+        print("Exception in on_command_error:")
+        traceback.print_exception(type(error), error, error.__traceback__, file=sys.stdout)
+
         if hasattr(ctx.command, 'on_error'):
             return
 

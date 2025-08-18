@@ -2,8 +2,8 @@ import bisect
 import os
 import random
 
-import discord
-from discord.ext import commands
+import nextcord as discord
+from nextcord.ext import commands
 from modules.economy import Economy
 from modules.helpers import *
 from PIL import Image

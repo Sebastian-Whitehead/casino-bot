@@ -1,7 +1,7 @@
 import os
-import discord
+import nextcord as discord
 from modules.helpers import ABS_PATH, make_embed
-from discord.ext import commands
+from nextcord.ext import commands
 import os
 
 
@@ -17,20 +17,26 @@ class Help(commands.Cog, name='help'):
     async def help(self, ctx, request=None):
         if not request:
             embed = make_embed(title="Commands")
-            commands_list = [
-                (
-                    name, [command for command in cog.get_commands()\
-                        if not command.hidden]
-                ) for name, cog in self.client.cogs.items()
-            ]
-            for name, cog_commands in commands_list:
+            print('Cog names and types:')
+            for name, cog in self.client.cogs.items():
+                print(f'  {name!r} ({type(name)})')
+            for name, cog in self.client.cogs.items():
+                # Only add cogs with a valid string name
+                if not isinstance(name, str):
+                    continue
+                cog_commands = [command for command in cog.get_commands() if not command.hidden]
                 if len(cog_commands) != 0:
+                    value_lines = []
+                    for command in cog_commands:
+                        try:
+                            value_lines.append(f'{self.client.command_prefix}{command.name}')
+                        except Exception as e:
+                            print(f'Error with command in cog {name}: {command}, error: {e}')
+                            value_lines.append(str(command))
+                    print(f'Adding field: name={name!r}, value={value_lines}')
                     embed.add_field(
                         name=name,
-                        value='\n'.join(
-                            [f'{self.client.command_prefix}{command}'
-                                for command in cog_commands]
-                        ),
+                        value='\n'.join(value_lines),
                         inline=False
                     )
             fp = os.path.join(ABS_PATH, 'modules/cards/aces.png')
