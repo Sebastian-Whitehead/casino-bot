@@ -133,6 +133,14 @@ class Slots(commands.Cog):
         view.bet_message = msg
 
     async def start_game(self, betting_view: BettingView, interaction: Interaction):
+        # Check for sufficient credits before starting
+        balance = self.economy.get_entry(betting_view.user.id)[2]
+        if betting_view.bet > balance:
+            await interaction.response.send_message(
+                f"You do not have enough credits to place this bet! (You have {balance}, bet is {betting_view.bet})",
+                ephemeral=True
+            )
+            return
         # Subtract bet at game start
         self.economy.add_credits(betting_view.user.id, -betting_view.bet)
         # Update betting message to show new balance after bet is subtracted
