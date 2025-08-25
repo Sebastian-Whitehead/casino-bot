@@ -16,6 +16,9 @@ with open(os.path.join(ABS_PATH.parent, 'config.yml'),  # type:ignore
     config_raw = yaml.safe_load(f.read())
     config = config_raw.get('bot', {})
 
+# Casino balance tracking toggle
+TRACK_CASINO_BALANCE = config.get('track_casino_balance', True)
+
 # Test guild and casino channel config
 TEST_GUILD_ID = config.get('test_guild_id')
 CASINO_CHANNEL_ID = config.get('casino_channel_id')
@@ -65,6 +68,7 @@ DEFAULT_BET = config.get('default_bet', 100)
 SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
 TOKEN_PRICE = config.get('token_price', 10)
 B_COOLDOWN = config.get('bonus_cooldown', 12)
+CASINO_USER_ID = config.get('casino_user_id', 0)
 # print('Loaded bot config:', config)  # Commented for less noisy startup
 # print('PREFIX:', PREFIX)
 

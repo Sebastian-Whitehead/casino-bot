@@ -81,8 +81,11 @@ async def cleanup_threads(interaction: discord.Interaction) -> None:
     await handle_cleanup_command(interaction)
 
 
-# --- Simple in-memory casino balance variable ---
-CASINO_BALANCE = 100000
+
+
+# --- Casino balance command (DB-backed) ---
+from modules.economy import Economy, CASINO_USER_ID
+
 
 @client.slash_command(
     description="Show the casino's current balance (owner only)",
@@ -90,11 +93,41 @@ CASINO_BALANCE = 100000
 )
 async def casino_balance(interaction: discord.Interaction) -> None:
     """Slash command to show the casino's current balance (owner only)."""
+    from modules.helpers import TRACK_CASINO_BALANCE
     if not _is_owner(interaction):
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
-    global CASINO_BALANCE
-    await interaction.response.send_message(f"Casino balance: ${CASINO_BALANCE}", ephemeral=True)
+    if not TRACK_CASINO_BALANCE:
+        await interaction.response.send_message("Casino balance tracking is disabled in config.", ephemeral=True)
+        return
+    econ = Economy()
+    casino_entry = econ.get_entry(CASINO_USER_ID)
+    casino_balance = casino_entry[1] if casino_entry else 0
+    await interaction.response.send_message(f"Casino balance: ${casino_balance}", ephemeral=True)
+
+
+# --- Add money to casino (owner only) ---
+@client.slash_command(
+    description="Add money to the casino's balance (owner only)",
+    **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+)
+async def add_casino_money(interaction: discord.Interaction, amount: int) -> None:
+    """Slash command to add money to the casino's balance (owner only)."""
+    from modules.helpers import TRACK_CASINO_BALANCE
+    if not _is_owner(interaction):
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    if not TRACK_CASINO_BALANCE:
+        await interaction.response.send_message("Casino balance tracking is disabled in config.", ephemeral=True)
+        return
+    if amount == 0:
+        await interaction.response.send_message("Amount must not be zero.", ephemeral=True)
+        return
+    econ = Economy()
+    econ.add_money(CASINO_USER_ID, amount)
+    casino_entry = econ.get_entry(CASINO_USER_ID)
+    casino_balance = casino_entry[1] if casino_entry else 0
+    await interaction.response.send_message(f"Added ${amount} to the casino. New balance: ${casino_balance}", ephemeral=True)
 
 
 
@@ -103,10 +136,10 @@ for filename in os.listdir(COG_FOLDER):
     if filename.endswith('.py') and filename != 'legacy_gambling.py':
         client.load_extension(f'cogs.{filename[:-3]}')
 # Ensure leaderboard cog is loaded (if not already in folder)
-try:
-    client.load_extension('cogs.leaderboard')
-except Exception:
-    pass
+#try:
+#    client.load_extension('cogs.leaderboard')
+#except Exception:
+#    pass
 
 if __name__ == "__main__":
     client.run(TOKEN)

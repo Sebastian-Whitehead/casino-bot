@@ -2,15 +2,19 @@ import random
 import sqlite3
 from functools import wraps
 from typing import Tuple, List
+from modules.helpers import CASINO_USER_ID
 
 
 Entry = Tuple[int, int, int]
 
-CASINO_USER_ID = 0
 CASINO_START_BALANCE = 100000
 
 
 class Economy:
+    def get_all_entries(self) -> List[Entry]:
+        """Return all entries in the economy table as a list of (user_id, money, credits)."""
+        self.cur.execute("SELECT * FROM economy")
+        return self.cur.fetchall()
     """A wrapper for the economy database (Singleton)"""
     _instance = None
     def __new__(cls, *args, **kwargs):
@@ -30,7 +34,9 @@ class Economy:
 
     def open(self):
         """Initializes the database"""
-        self.conn = sqlite3.connect('economy.db')
+        import os
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'economy.db')
+        self.conn = sqlite3.connect(db_path)
         self.cur = self.conn.cursor()
         self.cur.execute("""CREATE TABLE IF NOT EXISTS economy (
             user_id INTEGER NOT NULL PRIMARY KEY,
