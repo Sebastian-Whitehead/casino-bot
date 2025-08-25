@@ -136,8 +136,8 @@ class Roller(commands.Cog):
         **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
     )
     async def diceroll(self, interaction: discord.Interaction):
-        from modules.helpers import CASINO_CHANNEL_ID
-        if interaction.channel.id != CASINO_CHANNEL_ID:
+        from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
+        if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
             await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
             return
         if interaction.response.is_done():

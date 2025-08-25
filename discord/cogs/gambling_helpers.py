@@ -1,4 +1,3 @@
-
 import nextcord
 import nextcord as discord
 from nextcord.ext import commands
@@ -47,8 +46,8 @@ class GamblingHelpers(commands.Cog, name='General'):
         guild_ids=[TEST_GUILD_ID]
     )
     async def balance(self, interaction: nextcord.Interaction, user: nextcord.Member = None):
-        from modules.helpers import CASINO_CHANNEL_ID
-        if interaction.channel.id != CASINO_CHANNEL_ID:
+        from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
+        if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
             await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
             return
         user = user or interaction.user

@@ -69,6 +69,7 @@ SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
 TOKEN_PRICE = config.get('token_price', 10)
 B_COOLDOWN = config.get('bonus_cooldown', 12)
 CASINO_USER_ID = config.get('casino_user_id', 0)
+RESTRICT_TO_CASINO_CHANNEL = config.get('restrict_to_casino_channel', True)
 # print('Loaded bot config:', config)  # Commented for less noisy startup
 # print('PREFIX:', PREFIX)
 
