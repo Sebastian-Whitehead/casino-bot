@@ -340,9 +340,10 @@ class Slots(commands.Cog):
         # win logic
         result = ('lost', bet)
         # (1+s1)%6 gets the symbol 0-5 inclusive
+        from modules.helpers import SLOTS_MULTS
         if (1+s1)%6 == (1+s2)%6 == (1+s3)%6:
             symbol = (1+s1)%6
-            reward = [4, 80, 40, 25, 10, 5][symbol] * bet
+            reward = SLOTS_MULTS[symbol] * bet
             result = ('won', reward)
             self.economy.add_credits(betting_view.user.id, reward)
         # --- Game result logging ---

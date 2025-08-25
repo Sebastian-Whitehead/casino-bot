@@ -268,8 +268,9 @@ class Blackjack(commands.Cog):
     async def continue_game(self, game_view: GameView, interaction: Interaction):
         player_score = self.calc_hand(game_view.player_hand)
         dealer_score = self.calc_hand(game_view.dealer_hand)
+        from modules.helpers import BLACKJACK_BJ_MULT
         if player_score == 21:
-            win_amt = int(game_view.bet * 2.5)
+            win_amt = int(game_view.bet * BLACKJACK_BJ_MULT)
             self.economy.add_money(game_view.user.id, win_amt)
             await self.show_result(game_view, interaction, ("Blackjack!", 'won', win_amt))
             return
@@ -286,11 +287,12 @@ class Blackjack(commands.Cog):
         while dealer_score < 17:
             game_view.dealer_hand.append(game_view.deck.pop())
             dealer_score = self.calc_hand(game_view.dealer_hand)
+        from modules.helpers import BLACKJACK_MULT
         if dealer_score == 21:
             # Already lost bet
             result = ('Dealer blackjack', 'lost', 0)
         elif dealer_score > 21:
-            win_amt = game_view.bet * 2
+            win_amt = int(game_view.bet * BLACKJACK_MULT)
             self.economy.add_money(game_view.user.id, win_amt)
             result = ("Dealer busts", 'won', win_amt)
         elif dealer_score == player_score:
@@ -300,7 +302,7 @@ class Blackjack(commands.Cog):
             # Already lost bet
             result = ("You lose!", 'lost', 0)
         elif dealer_score < player_score:
-            win_amt = game_view.bet * 2
+            win_amt = int(game_view.bet * BLACKJACK_MULT)
             self.economy.add_money(game_view.user.id, win_amt)
             result = ("You win!", 'won', win_amt)
         await self.show_result(game_view, interaction, result)

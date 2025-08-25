@@ -26,21 +26,27 @@ with open(os.path.join(ABS_PATH.parent, 'config.yml'),  # type:ignore
     print('Loaded config.yml:', config_raw)
     config = config_raw.get('bot', {})
 
+
 # Expose thread cleanup config for import elsewhere
 THREAD_TIMEOUT_MINUTES = config_raw.get('thread_timeout_minutes', 60)
 THREAD_CLEANUP_CHECK_SECONDS = config_raw.get('thread_cleanup_check_seconds', 60)
 
-
+COINFLIP_MULT = config.get('coinflip_multiplier', 2)
+BLACKJACK_MULT = config.get('blackjack_multiplier', 2)
+BLACKJACK_BJ_MULT = config.get('blackjack_blackjack_multiplier', 2.5)
+SLOTS_MULTS = config.get('slots_multipliers', [4, 80, 40, 25, 10, 5])
+B_MULT = config.get('bonus_multiplier', 5)
+DICE_MULT = config.get('dice_multiplier', 5)
 TOKEN = config.get('token')
 PREFIX = config.get('prefix', '$')
 OWNER_IDS = config.get('owner_ids')
 DEFAULT_BET = config.get('default_bet', 100)
 SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
 TOKEN_PRICE = config.get('token_price', 10)
-B_MULT = config.get('bonus_multiplier', 5)
 B_COOLDOWN = config.get('bonus_cooldown', 12)
 print('Loaded bot config:', config)
 print('PREFIX:', PREFIX)
+
 
 
 def make_embed(title=None, description=None, color=None, author=None,

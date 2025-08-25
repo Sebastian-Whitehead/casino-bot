@@ -79,8 +79,10 @@ async def casino_balance(interaction: discord.Interaction):
         return
     await interaction.response.send_message(f"Casino balance: ${CASINO_BALANCE}", ephemeral=True)
 
+
+# Load all cogs except legacy_gambling.py
 for filename in os.listdir(COG_FOLDER):
-    if filename.endswith('.py'):
+    if filename.endswith('.py') and filename != 'legacy_gambling.py':
         client.load_extension(f'cogs.{filename[:-3]}')
 
 if __name__ == "__main__":
