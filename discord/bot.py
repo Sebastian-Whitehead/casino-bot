@@ -32,7 +32,7 @@ async def on_thread_delete(thread):
     parent_name = getattr(parent, 'name', None) if parent else None
     print(f"[Thread Delete] '{thread.name}' (ID: {thread.id}) deleted in channel: {parent_name}")
 
-TEST_GUILD_ID = 629027778347532298
+from modules.helpers import TEST_GUILD_ID
 USE_TEST_GUILD = True  # Set to True for fast test registration
 
 @client.event
@@ -62,6 +62,9 @@ async def handle_cleanup_command(interaction):
     **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
 )
 async def cleanup_threads(interaction: discord.Interaction):
+    if not _is_owner(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
     await handle_cleanup_command(interaction)
 
 
@@ -73,10 +76,10 @@ CASINO_BALANCE = 100000
     **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
 )
 async def casino_balance(interaction: discord.Interaction):
-    global CASINO_BALANCE
     if not _is_owner(interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
+    global CASINO_BALANCE
     await interaction.response.send_message(f"Casino balance: ${CASINO_BALANCE}", ephemeral=True)
 
 

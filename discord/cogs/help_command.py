@@ -1,4 +1,6 @@
 import os
+
+import nextcord
 import nextcord as discord
 from modules.helpers import ABS_PATH, make_embed
 from nextcord.ext import commands
@@ -9,53 +11,54 @@ class Help(commands.Cog, name='help'):
     def __init__(self, client: commands.Bot):
         self.client = client
 
-    @commands.command(
-        brief="Lists commands and gives info.",
-        usage="help *command",
-        hidden=True
+
+    from modules.helpers import TEST_GUILD_ID
+    @nextcord.slash_command(
+        description="Show all casino bot slash commands and info.",
+        guild_ids=[TEST_GUILD_ID]
     )
-    async def help(self, ctx, request=None):
-        if not request:
-            embed = make_embed(title="Commands")
-            print('Cog names and types:')
-            for name, cog in self.client.cogs.items():
-                print(f'  {name!r} ({type(name)})')
-            for name, cog in self.client.cogs.items():
-                # Only add cogs with a valid string name
-                if not isinstance(name, str):
-                    continue
-                cog_commands = [command for command in cog.get_commands() if not command.hidden]
-                if len(cog_commands) != 0:
-                    value_lines = []
-                    for command in cog_commands:
-                        try:
-                            value_lines.append(f'{self.client.command_prefix}{command.name}')
-                        except Exception as e:
-                            print(f'Error with command in cog {name}: {command}, error: {e}')
-                            value_lines.append(str(command))
-                    print(f'Adding field: name={name!r}, value={value_lines}')
-                    embed.add_field(
-                        name=name,
-                        value='\n'.join(value_lines),
-                        inline=False
-                    )
-            fp = os.path.join(ABS_PATH, 'modules/cards/aces.png')
-            file = discord.File(fp, filename='aces.png')
-            embed.set_thumbnail(url=f"attachment://aces.png")
-        else:
-            com = self.client.get_command(request)
-            if not com:
-                await ctx.invoke(self.client.get_command('help'))
-                return
-            embed = make_embed(
-                title=com.name, description=com.brief, footer="* optional"
-            )                       
-            embed.add_field(
-                name='Usage:',
-                value='`'+self.client.command_prefix+com.usage+'`'
-            )
-            file = None
-        await ctx.send(file=file, embed=embed)
+    async def help(self, interaction: nextcord.Interaction):
+        embed = make_embed(title="Casino Bot Slash Commands")
+        embed.add_field(
+            name="/blackjack",
+            value="Play a game of blackjack. Use the betting window to set your bet, then play against the dealer.",
+            inline=False
+        )
+        embed.add_field(
+            name="/slots",
+            value="Play the slot machine. Set your bet in credits, then spin for a chance at big multipliers!",
+            inline=False
+        )
+        embed.add_field(
+            name="/coinflip",
+            value="Flip a coin and bet on heads or tails. Set your bet, then choose your side.",
+            inline=False
+        )
+        embed.add_field(
+            name="/diceroll",
+            value="Roll a die and bet on the outcome (1-6). Set your bet, then guess the result.",
+            inline=False
+        )
+        embed.add_field(
+            name="/balance [user]",
+            value="Show your cash and slot credits. Optionally check another user's balance.",
+            inline=False
+        )
+        embed.add_field(
+            name="/buyc amount_to_buy",
+            value="Buy slot credits with your cash balance.",
+            inline=False
+        )
+        embed.add_field(
+            name="/sellc amount_to_sell",
+            value="Sell slot credits for cash.",
+            inline=False
+        )
+        embed.set_footer(text="All games use slash commands. Use the betting window to set your wager before starting each game.")
+        fp = os.path.join(ABS_PATH, 'modules/cards/aces.png')
+        file = discord.File(fp, filename='aces.png')
+        embed.set_thumbnail(url=f"attachment://aces.png")
+        await interaction.response.send_message(file=file, embed=embed, ephemeral=True)
 
 
     @commands.command(hidden=True)

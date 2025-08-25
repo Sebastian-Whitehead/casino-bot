@@ -1,3 +1,5 @@
+
+import nextcord
 import nextcord as discord
 from nextcord.ext import commands
 from modules.economy import Economy
@@ -38,24 +40,28 @@ class GamblingHelpers(commands.Cog, name='General'):
         self.economy.add_money(ctx.author.id, amount)
         await ctx.send(f"Added ${amount} come back in {self.bonus_cooldown}hrs")
 
-    @commands.command(
-        brief="How much money you or someone else has",
-        usage="money *[@member]",
-        aliases=['credits']
+    from modules.helpers import TEST_GUILD_ID
+    @nextcord.slash_command(
+        name="balance",
+        description="Show your cash and slot credits. Optionally check another user's balance.",
+        guild_ids=[TEST_GUILD_ID]
     )
-    async def money(self, ctx: commands.Context, user: discord.Member=None):
-        user = user.id if user else ctx.author.id
-        user = self.client.get_user(user)
+    async def balance(self, interaction: nextcord.Interaction, user: nextcord.Member = None):
+        from modules.helpers import CASINO_CHANNEL_ID
+        if interaction.channel.id != CASINO_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
+            return
+        user = user or interaction.user
         profile = self.economy.get_entry(user.id)
         embed = make_embed(
-            title=user.name,
+            title=f"{user.display_name}'s Balance",
             description=(
-                '**${:,}**'.format(profile[1]) +
-                '\n**{:,}** credits'.format(profile[2])
+                f'**${profile[1]:,}** cash' +
+                f'\n**{profile[2]:,}** credits'
             )
         )
         embed.set_thumbnail(url=user.display_avatar.url)
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=(user == interaction.user))
 
     @commands.command(
         brief="Shows the user with the most money",

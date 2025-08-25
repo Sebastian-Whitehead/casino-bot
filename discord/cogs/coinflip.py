@@ -19,34 +19,35 @@ class CoinFlipBettingView(ui.View):
         balance = self.cog.economy.get_entry(self.user.id)[1]
         return max(1, min(new_bet, balance))
 
-    @ui.button(label="/10", style=ButtonStyle.secondary, row=0, custom_id="bet_div_10")
-    async def bet_div_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet // 10)
-        await self.update_bet_message(interaction)
 
-    @ui.button(label="-10", style=ButtonStyle.secondary, row=0, custom_id="bet_minus_10")
-    async def bet_minus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-1", style=ButtonStyle.secondary, row=0, custom_id="bet_minus_1")
-    async def bet_minus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 1)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="x10", style=ButtonStyle.secondary, row=1, custom_id="bet_mul_10")
+    @ui.button(label="x10", style=ButtonStyle.secondary, row=0, custom_id="bet_mul_10")
     async def bet_mul_10(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet * 10)
         await self.update_bet_message(interaction)
 
-    @ui.button(label="+10", style=ButtonStyle.secondary, row=1, custom_id="bet_plus_10")
+    @ui.button(label="+10", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_10")
     async def bet_plus_10(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet + 10)
         await self.update_bet_message(interaction)
 
-    @ui.button(label="+1", style=ButtonStyle.secondary, row=1, custom_id="bet_plus_1")
+    @ui.button(label="+1", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_1")
     async def bet_plus_1(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet + 1)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="/10", style=ButtonStyle.secondary, row=1, custom_id="bet_div_10")
+    async def bet_div_10(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet // 10)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="-10", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_10")
+    async def bet_minus_10(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet - 10)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="-1", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_1")
+    async def bet_minus_1(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet - 1)
         await self.update_bet_message(interaction)
 
     @ui.button(label="Heads", style=ButtonStyle.primary, row=3, custom_id="coinflip_heads")
@@ -112,6 +113,10 @@ class CoinFlip(commands.Cog):
         description="Flip a coin."
     )
     async def coinflip(self, interaction: discord.Interaction):
+        from modules.helpers import CASINO_CHANNEL_ID
+        if interaction.channel.id != CASINO_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
+            return
         if interaction.response.is_done():
             print("[CoinFlip] Coinflip interaction already responded to, aborting.")
             return

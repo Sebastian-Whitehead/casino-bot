@@ -5,6 +5,27 @@ from pathlib import Path
 import yaml
 from nextcord import Color, Embed
 
+# --- Load config before using it ---
+os.chdir(Path(__file__).parent.parent)
+ABS_PATH = Path(os.getcwd())
+COG_FOLDER = os.path.join(ABS_PATH, 'cogs/')
+
+
+with open(os.path.join(ABS_PATH.parent, 'config.yml'),  # type:ignore
+            'r', encoding='utf-8') as f:
+    config_raw = yaml.safe_load(f.read())
+    config = config_raw.get('bot', {})
+
+# Test guild and casino channel config
+TEST_GUILD_ID = config.get('test_guild_id')
+CASINO_CHANNEL_ID = config.get('casino_channel_id')
+import os
+from datetime import datetime
+from pathlib import Path
+
+import yaml
+from nextcord import Color, Embed
+
 
 class InsufficientFundsException(Exception):
     def __init__(self, current, bet) -> None:

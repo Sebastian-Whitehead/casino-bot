@@ -13,8 +13,8 @@ class Handlers(commands.Cog, name='handlers'):
         print(self.client.user.name + " is ready")
         try:
             await self.client.change_presence(
-                activity=discord.Game(f"blackjack | {PREFIX}help")
-                )
+                activity=discord.Game(f"blackjack | /help")
+            )
         except:
             pass
 

@@ -64,34 +64,35 @@ class BettingView(ui.View):
         balance = self.cog.economy.get_entry(self.user.id)[2]
         return max(1, min(new_bet, balance))
 
-    @ui.button(label="/10", style=ButtonStyle.secondary, row=0, custom_id="bet_div_10")
-    async def bet_div_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet // 10)
-        await self.update_bet_message(interaction)
 
-    @ui.button(label="-10", style=ButtonStyle.secondary, row=0, custom_id="bet_minus_10")
-    async def bet_minus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-1", style=ButtonStyle.secondary, row=0, custom_id="bet_minus_1")
-    async def bet_minus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 1)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="x10", style=ButtonStyle.secondary, row=1, custom_id="bet_mul_10")
+    @ui.button(label="x10", style=ButtonStyle.secondary, row=0, custom_id="bet_mul_10")
     async def bet_mul_10(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet * 10)
         await self.update_bet_message(interaction)
 
-    @ui.button(label="+10", style=ButtonStyle.secondary, row=1, custom_id="bet_plus_10")
+    @ui.button(label="+10", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_10")
     async def bet_plus_10(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet + 10)
         await self.update_bet_message(interaction)
 
-    @ui.button(label="+1", style=ButtonStyle.secondary, row=1, custom_id="bet_plus_1")
+    @ui.button(label="+1", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_1")
     async def bet_plus_1(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet + 1)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="/10", style=ButtonStyle.secondary, row=1, custom_id="bet_div_10")
+    async def bet_div_10(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet // 10)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="-10", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_10")
+    async def bet_minus_10(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet - 10)
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="-1", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_1")
+    async def bet_minus_1(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.bet - 1)
         await self.update_bet_message(interaction)
 
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="bet_start")
@@ -127,9 +128,7 @@ class BettingView(ui.View):
         embed = make_embed(
             title="Set your bet (credits)",
             description=(
-                f"Current bet: {self.bet} credits\nWallet: {balance} credits\n"
-                f"To buy credits: `/buyc amount_to_buy:<number>`\n"
-                f"To sell credits: `/sellc amount_to_sell:<number>`"
+                f"Current bet: {self.bet} credits\nWallet: {balance} credits"
             )
         )
         await interaction.response.edit_message(embed=embed, view=self)
@@ -198,7 +197,7 @@ class Slots(commands.Cog):
         self.token_price = TOKEN_PRICE
         self.default_bet = DEFAULT_BET
 
-    TEST_GUILD_ID = 629027778347532298
+    from modules.helpers import TEST_GUILD_ID
     USE_TEST_GUILD = False  # Set to True for fast test registration
 
     @discord.slash_command(
@@ -206,6 +205,10 @@ class Slots(commands.Cog):
         **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
     )
     async def slots(self, interaction: discord.Interaction):
+        from modules.helpers import CASINO_CHANNEL_ID
+        if interaction.channel.id != CASINO_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
+            return
         if interaction.response.is_done():
             print("[Slots] Interaction already responded to, aborting.")
             return
@@ -223,18 +226,7 @@ class Slots(commands.Cog):
         bet = min(self.slots_default_bet, balance) if balance > 0 else 1
         view = BettingView(self, interaction.user, bet, thread)
         self.active_games[thread.id] = view
-        embed = make_embed(
-            title="Set your bet (credits)",
-            description=(
-                f"Current bet: {bet} credits\nWallet: {balance} credits\n"
-                f"Each credit costs ${self.token_price}.\n"
-                f"To buy credits: `/buyc amount_to_buy:<number>`\n"
-                f"To sell credits: `/sellc amount_to_sell:<number>`"
-            )
-        )
-        msg = await thread.send(embed=embed, view=view)
-        view.bet_message = msg
-        # Send a static instructions embed (buy/sell credits) as a separate message
+        # Send a static instructions embed (buy/sell credits) as the FIRST message
         instructions_embed = make_embed(
             title="How to Buy/Sell Credits",
             description=(
@@ -244,6 +236,15 @@ class Slots(commands.Cog):
             )
         )
         await thread.send(embed=instructions_embed)
+        # Now send the betting window embed, WITHOUT buy/sell instructions
+        embed = make_embed(
+            title="Set your bet (credits)",
+            description=(
+                f"Current bet: {bet} credits\nWallet: {balance} credits"
+            )
+        )
+        msg = await thread.send(embed=embed, view=view)
+        view.bet_message = msg
     async def end_game_by_thread(self, thread_id):
         # End/cleanup the game in this thread if it exists
         view = self.active_games.pop(thread_id, None)
