@@ -11,6 +11,8 @@ from modules.helpers import TEST_GUILD_ID
 USE_TEST_GUILD = True
 
 class RollerBettingView(ui.View):
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        return interaction.user.id == self.user.id
     def __init__(self, cog, user, bet, thread):
         super().__init__(timeout=None)
         self.cog = cog
@@ -90,6 +92,8 @@ class RollerBettingView(ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 class RollerGameView(ui.View):
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        return interaction.user.id == self.user.id
     def __init__(self, cog, user, bet, thread, betting_view, guess):
         super().__init__(timeout=60)
         self.cog = cog
