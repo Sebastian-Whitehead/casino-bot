@@ -44,7 +44,7 @@ COG_FOLDER = os.path.join(ABS_PATH, 'cogs/')
 with open(os.path.join(ABS_PATH.parent, 'config.yml'),  # type:ignore
             'r', encoding='utf-8') as f:
     config_raw = yaml.safe_load(f.read())
-    print('Loaded config.yml:', config_raw)
+    # print('Loaded config.yml:', config_raw)  # Commented for less noisy startup
     config = config_raw.get('bot', {})
 
 
@@ -65,8 +65,8 @@ DEFAULT_BET = config.get('default_bet', 100)
 SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
 TOKEN_PRICE = config.get('token_price', 10)
 B_COOLDOWN = config.get('bonus_cooldown', 12)
-print('Loaded bot config:', config)
-print('PREFIX:', PREFIX)
+# print('Loaded bot config:', config)  # Commented for less noisy startup
+# print('PREFIX:', PREFIX)
 
 
 

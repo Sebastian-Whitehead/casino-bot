@@ -10,7 +10,7 @@ GAME_CHANNEL_ID = 1409120191534858361  # <-- Your specified channel ID
 from modules.helpers import THREAD_TIMEOUT_MINUTES, THREAD_CLEANUP_CHECK_SECONDS
 
 # Debug: Print loaded config values at import
-print(f"[Thread Cleanup][DEBUG] Loaded config: TIMEOUT_MINUTES={THREAD_TIMEOUT_MINUTES}, CLEANUP_CHECK_SECONDS={THREAD_CLEANUP_CHECK_SECONDS}")
+# print(f"[Thread Cleanup][DEBUG] Loaded config: TIMEOUT_MINUTES={THREAD_TIMEOUT_MINUTES}, CLEANUP_CHECK_SECONDS={THREAD_CLEANUP_CHECK_SECONDS}")
 
 def setup_auto_thread_cleanup(client):
     async def auto_delete_dormant_threads():

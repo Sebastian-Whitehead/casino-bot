@@ -5,55 +5,12 @@ import random
 from modules.card import Card
 from modules.economy import Economy
 from modules.helpers import *
+from modules.base_betting_view import BaseBettingView
 
-class BettingView(ui.View):
+class BettingView(BaseBettingView):
     def __init__(self, cog, user, bet, thread):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.user = user
-        self.bet = bet
-        self.thread = thread
-        self.bet_message = None
-        self.game_message = None
+        super().__init__(cog, user, bet, thread)
 
-    def cap_bet(self, new_bet):
-        """Cap the bet to the user's balance, minimum 1."""
-        balance = self.cog.economy.get_entry(self.user.id)[1]
-        return max(1, min(new_bet, balance))
-
-
-    # --- Bet adjustment buttons (positive above negative) ---
-    @ui.button(label="x10", style=ButtonStyle.secondary, row=0, custom_id="bet_mul_10")
-    async def bet_mul_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet * 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="+10", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_10")
-    async def bet_plus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet + 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="+1", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_1")
-    async def bet_plus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet + 1)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="/10", style=ButtonStyle.secondary, row=1, custom_id="bet_div_10")
-    async def bet_div_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet // 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-10", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_10")
-    async def bet_minus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-1", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_1")
-    async def bet_minus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 1)
-        await self.update_bet_message(interaction)
-
-    # --- Start and Close buttons ---
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="bet_start")
     async def bet_start(self, button, interaction: Interaction):
         try:
@@ -62,27 +19,6 @@ class BettingView(ui.View):
         except Exception as e:
             print(f"[Blackjack] Error deferring interaction: {e}")
         await self.cog.start_game(self, interaction)
-
-    @ui.button(emoji="❌", style=ButtonStyle.danger, row=2, custom_id="close")
-    async def close(self, button, interaction: Interaction):
-        # Just close the window/thread, no forfeit logic
-        # End the game and close the thread
-        if self.game_message:
-            await self.game_message.delete()
-        if self.cog.active_games.get(self.thread.id) is self:
-            del self.cog.active_games[self.thread.id]
-        if self.bet_message:
-            try:
-                await self.bet_message.edit(view=None)
-            except Exception:
-                pass
-        await interaction.response.send_message(
-            "Game ended and thread closed.",
-            ephemeral=True)
-        try:
-            await self.thread.edit(archived=True, locked=True)
-        except Exception:
-            pass
 
     async def update_bet_message(self, interaction):
         balance = self.cog.economy.get_entry(self.user.id)[1]

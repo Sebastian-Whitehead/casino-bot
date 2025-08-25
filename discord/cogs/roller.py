@@ -5,57 +5,29 @@ from nextcord import ui, Interaction, ButtonStyle
 from modules.economy import Economy
 
 from modules.helpers import make_embed, DEFAULT_BET
+from modules.base_betting_view import BaseBettingView
 
 # --- TEST GUILD CONFIG FOR SLASH COMMANDS (local, like blackjack/slots) ---
 from modules.helpers import TEST_GUILD_ID
 USE_TEST_GUILD = True
 
-class RollerBettingView(ui.View):
-    async def interaction_check(self, interaction: Interaction) -> bool:
-        return interaction.user.id == self.user.id
+
+class RollerBettingView(BaseBettingView):
     def __init__(self, cog, user, bet, thread):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.user = user
-        self.bet = bet
-        self.thread = thread
-        self.bet_message = None
-        self.game_message = None
+        super().__init__(cog, user, bet, thread)
 
-    def cap_bet(self, new_bet: int) -> int:
+    @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="start_game")
+    async def start_game(self, button, interaction: Interaction):
+        # Do not disable betting window, just show guessing embed
+        await self.cog.show_guessing_embed(self, interaction)
+
+    async def update_bet_message(self, interaction):
         balance = self.cog.economy.get_entry(self.user.id)[1]
-        return max(1, min(new_bet, balance))
-
-
-    @ui.button(label="x10", style=ButtonStyle.secondary, row=0, custom_id="bet_mul_10")
-    async def bet_mul_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet * 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="+10", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_10")
-    async def bet_plus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet + 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="+1", style=ButtonStyle.secondary, row=0, custom_id="bet_plus_1")
-    async def bet_plus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet + 1)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="/10", style=ButtonStyle.secondary, row=1, custom_id="bet_div_10")
-    async def bet_div_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet // 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-10", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_10")
-    async def bet_minus_10(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 10)
-        await self.update_bet_message(interaction)
-
-    @ui.button(label="-1", style=ButtonStyle.secondary, row=1, custom_id="bet_minus_1")
-    async def bet_minus_1(self, button, interaction: Interaction):
-        self.bet = self.cap_bet(self.bet - 1)
-        await self.update_bet_message(interaction)
+        embed = make_embed(
+            title="Set your bet ($)",
+            description=f"Current bet: ${self.bet}\nWallet: ${balance}"
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="start_game")
