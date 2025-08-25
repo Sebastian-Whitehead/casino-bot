@@ -19,16 +19,24 @@ ABS_PATH = Path(os.getcwd())
 COG_FOLDER = os.path.join(ABS_PATH, 'cogs/')
 
 
+
 with open(os.path.join(ABS_PATH.parent, 'config.yml'),  # type:ignore
             'r', encoding='utf-8') as f:
     config_raw = yaml.safe_load(f.read())
     print('Loaded config.yml:', config_raw)
     config = config_raw.get('bot', {})
 
+# Expose thread cleanup config for import elsewhere
+THREAD_TIMEOUT_MINUTES = config_raw.get('thread_timeout_minutes', 60)
+THREAD_CLEANUP_CHECK_SECONDS = config_raw.get('thread_cleanup_check_seconds', 60)
+
+
 TOKEN = config.get('token')
 PREFIX = config.get('prefix', '$')
 OWNER_IDS = config.get('owner_ids')
 DEFAULT_BET = config.get('default_bet', 100)
+SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
+TOKEN_PRICE = config.get('token_price', 10)
 B_MULT = config.get('bonus_multiplier', 5)
 B_COOLDOWN = config.get('bonus_cooldown', 12)
 print('Loaded bot config:', config)

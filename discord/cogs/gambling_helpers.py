@@ -7,7 +7,12 @@ from modules.helpers import *
 class GamblingHelpers(commands.Cog, name='General'):
     def __init__(self, client: commands.Bot) -> None:
         self.client = client
+        from modules.economy import Economy
+        from modules.helpers import DEFAULT_BET, B_MULT, B_COOLDOWN
         self.economy = Economy()
+        self.default_bet = DEFAULT_BET
+        self.bonus_multiplier = B_MULT
+        self.bonus_cooldown = B_COOLDOWN
 
     @commands.command(hidden=True)
     @commands.is_owner()
@@ -24,14 +29,14 @@ class GamblingHelpers(commands.Cog, name='General'):
             self.economy.set_credits(user_id, credits)
 
     @commands.command(
-        brief=f"Gives you ${DEFAULT_BET*B_MULT} once every {B_COOLDOWN}hrs",
+        brief="Gives you your bonus once every set cooldown hours.",
         usage="add"
     )
-    @commands.cooldown(1, B_COOLDOWN*3600, type=commands.BucketType.user)
+    @commands.cooldown(1, 1, type=commands.BucketType.user)  # Cooldown set dynamically
     async def add(self, ctx: commands.Context):
-        amount = DEFAULT_BET*B_MULT
+        amount = self.default_bet * self.bonus_multiplier
         self.economy.add_money(ctx.author.id, amount)
-        await ctx.send(f"Added ${amount} come back in {B_COOLDOWN}hrs")
+        await ctx.send(f"Added ${amount} come back in {self.bonus_cooldown}hrs")
 
     @commands.command(
         brief="How much money you or someone else has",

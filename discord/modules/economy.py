@@ -6,10 +6,27 @@ from typing import Tuple, List
 
 Entry = Tuple[int, int, int]
 
+CASINO_USER_ID = 0
+CASINO_START_BALANCE = 100000
+
+
 class Economy:
-    """A wrapper for the economy database"""
+    """A wrapper for the economy database (Singleton)"""
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, '_instance') or cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
+        if getattr(self, '_initialized', False):
+            return
         self.open()
+        # Ensure casino entry exists
+        if not self.get_entry(CASINO_USER_ID):
+            self.set_money(CASINO_USER_ID, CASINO_START_BALANCE)
+        self._initialized = True
 
     def open(self):
         """Initializes the database"""
@@ -81,6 +98,10 @@ class Economy:
 
     @_commit
     def add_money(self, user_id: int, money_to_add: int) -> Entry:
+        # If not casino, transfer to/from casino
+        if user_id != CASINO_USER_ID:
+            # Player loses money, casino gains it
+            self.add_money(CASINO_USER_ID, -money_to_add)
         money = self.get_entry(user_id)[1]
         total = money + money_to_add
         if total < 0:
