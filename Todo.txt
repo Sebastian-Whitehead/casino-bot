@@ -1,0 +1,14 @@
+Broken:
+- Dice roll is broken
+- Wallet is not updating when a game ends
+- Casino balance is not tracking to casino bot user id
+- start button not present in the slots game
+- Thread tidy up is also broken and is finding but not deleting threads
+
+Nice to have:
+- Allow buying and selling of slots credits in slots thread
+
+Future Features:
+- Challenge In coin flipping and dice rolling
+- Roulette
+- Horse Race Betting
