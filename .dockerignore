@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__/
+*.pyc
+*.db
+config.yml
+casino-bot.git
+modules
+pictures
+*.md
+*.txt
+!requirements.txt
+.env

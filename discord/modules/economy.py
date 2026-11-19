@@ -80,7 +80,7 @@ class Economy:
     def open(self):
         """Initializes the database"""
         import os
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'economy.db')
+        db_path = os.environ.get('ECONOMY_DB_PATH') or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'economy.db')
         self.conn = sqlite3.connect(db_path)
         self.cur = self.conn.cursor()
         self.cur.execute("""CREATE TABLE IF NOT EXISTS economy (

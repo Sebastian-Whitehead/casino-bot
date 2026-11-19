@@ -1,6 +1,6 @@
 import nextcord as discord
 from nextcord.ext import commands
-from discord.ext.commands.errors import *
+from nextcord.ext.commands.errors import *
 from modules.helpers import PREFIX, InsufficientFundsException
 
 

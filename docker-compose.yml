@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      ECONOMY_DB_PATH: /data/economy.db
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - economy-data:/data
+volumes:
+  economy-data:
