@@ -57,7 +57,7 @@ class GameResultView(ui.View):
 
     @ui.button(label="Play Again", style=ButtonStyle.success, row=0, custom_id="result_play_again")
     async def play_again(self, button, interaction: Interaction):
-        await self.cog.start_round(self.betting_view, interaction, **self.replay_kwargs)
+        await self.cog.start_round(self.betting_view, interaction, confirmed=True, **self.replay_kwargs)  # same bet again
 
     @ui.button(label="Back to Bet", style=ButtonStyle.secondary, row=0, custom_id="result_back_to_bet")
     async def back_to_bet(self, button, interaction: Interaction):
@@ -69,3 +69,15 @@ class GameResultView(ui.View):
             pass
         self.betting_view.game_message = None
         await self.betting_view.refresh_bet_message()
+
+
+WRONG_CHANNEL = "This command can only be used in the designated casino channel."
+
+
+async def ensure_casino_channel(interaction) -> bool:
+    """The one casino-channel restriction: replies (ephemeral) and returns False when not allowed."""
+    from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL  # read live so tests can patch
+    if not RESTRICT_TO_CASINO_CHANNEL or interaction.channel.id == CASINO_CHANNEL_ID:
+        return True
+    await interaction.response.send_message(WRONG_CHANNEL, ephemeral=True)
+    return False

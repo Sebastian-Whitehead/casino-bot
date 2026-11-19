@@ -8,27 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("ECONOMY_DB_PATH", os.path.join(tempfile.mkdtemp(), "t.db"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "discord"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.card import Card  # noqa: E402
 from modules import helpers  # noqa: E402
 from cogs import blackjack as bj  # noqa: E402
-
-
-class FakeEconomy:
-    def __init__(self, chips):
-        self.chips = {1: chips, "casino": 0}
-
-    def get_chips(self, uid):
-        return self.chips[uid]
-
-    def place_bet(self, uid, n):
-        assert n > 0 and self.chips[uid] >= n
-        self.chips[uid] -= n
-        self.chips["casino"] += n
-
-    def pay_out(self, uid, n):
-        self.chips["casino"] -= n
-        self.chips[uid] += n
+from fakes import FakeEconomy  # noqa: E402
 
 
 def hand(*values):
@@ -46,7 +31,8 @@ def make_cog(chips=100):
 def make_game(cog, bet, player, dealer, deck=()):
     thread = SimpleNamespace(id=5, send=AsyncMock(), edit=AsyncMock())
     bv = bj.BettingView(cog, SimpleNamespace(id=1), bet, thread)
-    cog.economy.place_bet(1, bet)
+    cog.economy.open_wager("g1", 1, "Blackjack", bet)
+    bv.game_id = "g1"
     bv.in_round = True
     bv.bet_in_play = bet
     gv = bj.GameView(cog, bv.user, bet, thread, list(deck), hand(*player), hand(*dealer), bv)

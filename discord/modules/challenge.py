@@ -5,10 +5,10 @@ from modules.helpers import (
     CHALLENGE_FEE_ENABLED,
     CHALLENGE_FEE_PERCENT,
     InsufficientFundsException,
-    make_embed,
 )
-from modules.base_game_cog import BaseGameCog
-from modules.game_ui import format_chips, safe_send
+from modules.base_game_cog import BaseGameCog, new_game_id
+from modules.embed_processor import member_replacements, render_embed
+from modules.game_ui import ensure_casino_channel, format_chips, safe_edit, safe_send
 
 
 class ChallengeView(ui.View):
@@ -22,6 +22,17 @@ class ChallengeView(ui.View):
         self.game_name = game_name
         self.challenge_message = None
         self.resolved = False
+        self.game_id = None  # shared by both players' wagers once accepted
+
+    def replacements(self, **extra):
+        """Placeholders shared by every challenge embed ({game} {bet} {challenger} {opponent} + names/ids)."""
+        return {
+            "{game}": self.game_name,
+            "{bet}": format_chips(self.bet),
+            **member_replacements(self.challenger, "challenger"),
+            **member_replacements(self.opponent, "opponent"),
+            **extra,
+        }
 
     async def interaction_check(self, interaction):
         if interaction.user.id not in (self.challenger.id, self.opponent.id):
@@ -56,10 +67,17 @@ class ChallengeView(ui.View):
             return
         self.resolved = True
         await interaction.response.edit_message(
-            content="Challenge declined.",
-            embed=None,
+            **render_embed("challenge_declined", self.replacements(**member_replacements(interaction.user))),
             view=None
         )
+        self.stop()
+
+    async def on_timeout(self):
+        if self.resolved or not self.challenge_message:
+            return
+        self.resolved = True
+        await safe_edit(self.challenge_message, view=None,
+                        **render_embed("challenge_expired", self.replacements()))
 
 
 class ChallengeGameCog(BaseGameCog):
@@ -70,6 +88,8 @@ class ChallengeGameCog(BaseGameCog):
             await interaction.response.send_message(message, ephemeral=True)
             return None
 
+        if not await ensure_casino_channel(interaction):
+            return None
         if opponent.id == interaction.user.id:
             return await reject("You cannot challenge yourself.")
         if opponent.bot:
@@ -95,55 +115,50 @@ class ChallengeGameCog(BaseGameCog):
         challenge = ChallengeView(
             self, interaction.user, opponent, bet, thread, game_name
         )
-        embed = make_embed(
-            title=f"{game_name} Challenge",
-            description=(
-                f"{interaction.user.mention} challenged {opponent.mention}.\n"
-                f"Each player bets **{format_chips(bet)}**.\n"
-                "The challenged player must accept or decline."
-            )
-        )
-        challenge.challenge_message = await safe_send(thread, embed=embed, view=challenge)
+        # the file's "content" pings the opponent; mentions inside an embed do not notify
+        challenge.challenge_message = await safe_send(
+            thread, view=challenge, **render_embed("challenge", challenge.replacements()))
         return challenge
 
     async def accept_challenge(self, challenge, interaction):
         if challenge.resolved:
             return
         challenge.resolved = True
+        challenge.game_id = game_id = new_game_id()
         staked = []
         try:
             for player in (challenge.challenger, challenge.opponent):
-                self.economy.place_bet(player.id, challenge.bet)
+                self.economy.open_wager(game_id, player.id, challenge.game_name, challenge.bet)
                 staked.append(player)
         except InsufficientFundsException:
             for player in staked:  # undo the first stake
-                self.economy.pay_out(player.id, challenge.bet)
+                self.economy.refund_wager(game_id, player.id)
             await interaction.response.edit_message(
-                content="Challenge cancelled because a player no longer has enough chips.",
-                embed=None,
-                view=None
+                **render_embed("challenge_cancelled", challenge.replacements()), view=None
             )
             return
         await interaction.response.edit_message(
-            content="Challenge accepted. Rolling now...",
-            embed=None,
-            view=None
+            **render_embed("challenge_accepted", challenge.replacements()), view=None
         )
-        await self.resolve_challenge(challenge)
+        try:
+            await self.resolve_challenge(challenge)
+        except BaseException:  # never leave either stake with the casino
+            self.refund_challenge(challenge)
+            raise
 
-    def settle_challenge(self, winner_id, bet):
-        """Pay the winner the pot minus a floored fee; the fee stays with the casino."""
-        pot = bet * 2
+    def settle_challenge(self, challenge, winner, loser):
+        """Winner gets the pot minus a floored fee (the fee stays with the casino); the loser's wager closes at 0."""
+        pot = challenge.bet * 2
         fee = (
             math.floor(pot * CHALLENGE_FEE_PERCENT / 100)
             if CHALLENGE_FEE_ENABLED
             else 0
         )
         payout = pot - fee
-        if payout > 0:
-            self.economy.pay_out(winner_id, payout)
+        self.economy.settle_wager(challenge.game_id, winner.id, payout)
+        self.economy.settle_wager(challenge.game_id, loser.id, 0)
         return payout, fee
 
     def refund_challenge(self, challenge):
-        self.economy.pay_out(challenge.challenger.id, challenge.bet)
-        self.economy.pay_out(challenge.opponent.id, challenge.bet)
+        for player in (challenge.challenger, challenge.opponent):
+            self.economy.refund_wager(challenge.game_id, player.id)

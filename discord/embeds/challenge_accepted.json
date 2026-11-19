@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "{game} Challenge Accepted",
+      "description": "{opponent} accepted. Both players staked **{bet}**. Flipping now...",
+      "color": 3066993
+    }
+  ]
+}

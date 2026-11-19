@@ -118,6 +118,58 @@ class EconomyTest(unittest.TestCase):
         self.assertEqual(self.e.get_chips(U), 12)
         self.assertEqual(self.total_chips(), total)
 
+    def test_wager_open_settle_is_idempotent(self):
+        self.e.set_credits(U, 10)
+        total = self.total_chips()
+        self.e.open_wager("g1", U, "Slots", 4)
+        self.assertEqual(self.e.get_chips(U), 6)
+        self.assertTrue(self.e.settle_wager("g1", U, 8))
+        self.assertEqual(self.e.get_chips(U), 14)
+        self.assertFalse(self.e.settle_wager("g1", U, 8))  # a retry must not pay twice
+        self.assertFalse(self.e.refund_wager("g1", U))      # closed wagers cannot be refunded
+        self.assertEqual(self.e.get_chips(U), 14)
+        self.assertEqual(self.total_chips(), total)
+
+    def test_wager_loss_and_refund(self):
+        self.e.set_credits(U, 10)
+        self.e.open_wager("g2", U, "Blackjack", 3)
+        self.assertTrue(self.e.settle_wager("g2", U, 0))
+        self.assertEqual(self.e.get_chips(U), 7)
+        self.e.open_wager("g3", U, "Blackjack", 3)
+        self.assertTrue(self.e.refund_wager("g3", U))
+        self.assertEqual(self.e.get_chips(U), 7)
+
+    def test_wager_rejects_insufficient_duplicate_and_unknown(self):
+        self.e.set_credits(U, 3)
+        with self.assertRaises(InsufficientFundsException):
+            self.e.open_wager("g4", U, "Slots", 4)
+        self.assertEqual(self.e.get_chips(U), 3)
+        self.e.open_wager("g4", U, "Slots", 2)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.e.open_wager("g4", U, "Slots", 1)
+        self.assertEqual(self.e.get_chips(U), 1)  # the failed duplicate took nothing
+        with self.assertRaises(KeyError):
+            self.e.settle_wager("nope", U, 1)
+        with self.assertRaises(ValueError):
+            self.e.settle_wager("g4", U, -1)
+
+    def test_two_player_wager_shares_a_game_id(self):
+        self.e.set_credits(U, 5)
+        self.e.get_entry(222)
+        self.e.set_credits(222, 5)
+        self.e.open_wager("duel", U, "Coin Flip", 5)
+        self.e.open_wager("duel", 222, "Coin Flip", 5)
+        self.assertTrue(self.e.settle_wager("duel", U, 9))  # pot 10 minus a 1 chip fee
+        self.assertTrue(self.e.settle_wager("duel", 222, 0))
+        self.assertEqual((self.e.get_chips(U), self.e.get_chips(222)), (9, 0))
+
+    def test_open_wagers_are_refunded_on_startup(self):
+        self.e.set_credits(U, 10)
+        self.e.open_wager("orphan", U, "Blackjack", 6)
+        self.assertEqual(self.e.refund_open_wagers(), 1)
+        self.assertEqual(self.e.get_chips(U), 10)
+        self.assertEqual(self.e.refund_open_wagers(), 0)
+
     def test_migration_runs_once_and_keeps_credits(self):
         path = os.path.join(tempfile.mkdtemp(dir=_TMP), 'old.db')
         cid = Economy().casino_user_id  # same config id the new instance will use

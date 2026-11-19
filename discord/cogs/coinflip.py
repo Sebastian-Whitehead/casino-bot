@@ -3,11 +3,12 @@ import nextcord as discord
 from nextcord.ext import commands
 from nextcord import ui, Interaction, ButtonStyle
 from modules.economy import Economy
-from modules.helpers import (make_embed, DEFAULT_BET, COINFLIP_MULT,
+from modules.helpers import (DEFAULT_BET, COINFLIP_MULT,
                              COINFLIP_MIN_BET, payout)
 from modules.base_betting_view import BaseBettingView
 from modules.base_game_cog import Outcome
 from modules.challenge import ChallengeGameCog
+from modules.embed_processor import member_replacements, render_embed
 from modules.game_ui import format_chips, safe_send
 
 
@@ -54,6 +55,18 @@ class CoinFlip(ChallengeGameCog, commands.Cog):
             return
         await self.open_game(interaction, CoinFlipBettingView)
 
+    @discord.slash_command(
+        name="cf-challenge",
+        description="Challenge another user to a coin flip for chips."
+    )
+    async def cf_challenge(
+        self,
+        interaction: discord.Interaction,
+        opponent: discord.Member = discord.SlashOption(description="Who to challenge"),
+        bet: int = discord.SlashOption(description="Chips each player bets"),
+    ):
+        await self.open_challenge(interaction, opponent, bet, self.game_name)
+
     async def play(self, betting_view, interaction, user_choice):
         result = random.choice(["heads", "tails"])
         win = result == user_choice
@@ -70,18 +83,12 @@ class CoinFlip(ChallengeGameCog, commands.Cog):
         result = random.choice(["heads", "tails"])
         winner = challenge.challenger if result == "heads" else challenge.opponent
         loser = challenge.opponent if winner.id == challenge.challenger.id else challenge.challenger
-        won, fee = self.settle_challenge(winner.id, challenge.bet)
+        won, fee = self.settle_challenge(challenge, winner, loser)
         fee_text = f"\nCasino fee: {format_chips(fee)}" if fee else ""
-        embed = make_embed(
-            title=f"Coin Flip: {result.capitalize()}",
-            description=(
-                f"{winner.mention} wins against {loser.mention}!\n"
-                f"{challenge.challenger.mention} had heads; {challenge.opponent.mention} had tails.\n"
-                f"Payout: {format_chips(won)}{fee_text}"
-            ),
-            color=discord.Color.green()
-        )
-        await safe_send(challenge.thread, embed=embed)
+        replacements = challenge.replacements(
+            **{"{result}": result.capitalize(), "{payout}": format_chips(won), "{fee_line}": fee_text},
+            **member_replacements(winner, "winner"), **member_replacements(loser, "loser"))
+        await safe_send(challenge.thread, **render_embed("coinflip_challenge_result", replacements))
 
 
 def setup(client):

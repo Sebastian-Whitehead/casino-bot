@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "Dice Roll Challenge",
+      "description": "{winner} wins against {loser}!\nWinner rolled **{winner_roll}**; loser rolled **{loser_roll}**.\nPayout: {payout}{fee_line}",
+      "color": 3066993
+    }
+  ]
+}

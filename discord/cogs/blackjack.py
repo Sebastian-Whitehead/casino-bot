@@ -85,7 +85,7 @@ class Blackjack(BaseGameCog, commands.Cog):
         if view is not None and view.in_round:
             view.in_round = False
             try:
-                self.economy.pay_out(view.user.id, view.bet_in_play)  # hand abandoned: refund the stake
+                self.economy.refund_wager(view.game_id, view.user.id)  # hand abandoned: refund the stake
             except Exception as e:
                 print(f"[Blackjack] Refund failed: {e}")
 
@@ -93,7 +93,7 @@ class Blackjack(BaseGameCog, commands.Cog):
         self.refund_open_round(self.active_games.get(thread_id))
         await super().end_game_by_thread(thread_id)
 
-    async def start_round(self, betting_view, interaction, **choice):
+    async def start_round(self, betting_view, interaction, confirmed=False, **choice):
         """Start button and Play Again: deduct the bet, deal, show Hit/Stand."""
         if betting_view.in_round:  # double click or a round already running
             try:
@@ -104,12 +104,14 @@ class Blackjack(BaseGameCog, commands.Cog):
             return
         betting_view.in_round = True
         try:
-            if not await self.prepare_bet_round(betting_view, interaction):
+            started = await self.begin_wager(betting_view, interaction, choice, confirmed)
+            if started is None:
                 betting_view.in_round = False
                 return
         except Exception:
             betting_view.in_round = False
             raise
+        _, interaction = started
         betting_view.bet_in_play = betting_view.bet
         try:
             if not interaction.response.is_done():
@@ -129,10 +131,7 @@ class Blackjack(BaseGameCog, commands.Cog):
                 return
             await self.replace_game_message(game_view, "Your Turn")
         except Exception:
-            # shortcut: refunds only the common failure path; a crash mid-hand keeps the stake with the casino
-            if betting_view.in_round:
-                betting_view.in_round = False
-                self.economy.pay_out(betting_view.user.id, betting_view.bet_in_play)
+            self.refund_open_round(betting_view)  # the wager is still open: give the stake back
             raise
 
     async def continue_game(self, game_view: GameView):
@@ -181,7 +180,7 @@ class Blackjack(BaseGameCog, commands.Cog):
                        f"Dealer's hand: {self.calc_hand(game_view.dealer_hand)}")
         try:
             file = self.render_file(game_view.user.id, game_view.dealer_hand, game_view.player_hand)
-            await self.settle(bv, Outcome(won, amount, title, description, file), {})
+            await self.settle(bv, Outcome(won, amount, title, description, file), {}, bv.game_id)
         finally:
             bv.in_round = False
 

@@ -4,10 +4,11 @@ from nextcord.ext import commands
 from nextcord import ui, Interaction, ButtonStyle
 from modules.economy import Economy
 
-from modules.helpers import make_embed, DEFAULT_BET, DICE_MULT, payout
+from modules.helpers import DEFAULT_BET, DICE_MULT, payout
 from modules.base_betting_view import BaseBettingView
 from modules.base_game_cog import Outcome
 from modules.challenge import ChallengeGameCog
+from modules.embed_processor import member_replacements, render_embed
 from modules.game_ui import format_chips, safe_send
 
 # --- TEST GUILD CONFIG FOR SLASH COMMANDS (local, like blackjack/slots) ---
@@ -78,32 +79,21 @@ class Roller(ChallengeGameCog, commands.Cog):
         opponent_roll = random.randint(1, 6)
         if challenger_roll == opponent_roll:
             self.refund_challenge(challenge)
-            embed = make_embed(
-                title="Dice Roll: Tie",
-                description=(
-                    f"Both players rolled **{challenger_roll}**.\n"
-                    f"Both {format_chips(challenge.bet)} bets were refunded."
-                ),
-                color=discord.Color.blue()
-            )
+            message = render_embed("dice_challenge_tie",
+                                   challenge.replacements(**{"{roll}": challenger_roll}))
         else:
             challenger_wins = challenger_roll > opponent_roll
             winner, loser = ((challenge.challenger, challenge.opponent) if challenger_wins
                              else (challenge.opponent, challenge.challenger))
             winner_roll, loser_roll = ((challenger_roll, opponent_roll) if challenger_wins
                                        else (opponent_roll, challenger_roll))
-            won, fee = self.settle_challenge(winner.id, challenge.bet)
+            won, fee = self.settle_challenge(challenge, winner, loser)
             fee_text = f"\nCasino fee: {format_chips(fee)}" if fee else ""
-            embed = make_embed(
-                title="Dice Roll Challenge",
-                description=(
-                    f"{winner.mention} wins against {loser.mention}!\n"
-                    f"Winner rolled **{winner_roll}**; loser rolled **{loser_roll}**.\n"
-                    f"Payout: {format_chips(won)}{fee_text}"
-                ),
-                color=discord.Color.green()
-            )
-        await safe_send(challenge.thread, embed=embed)
+            message = render_embed("dice_challenge_win", challenge.replacements(
+                **{"{winner_roll}": winner_roll, "{loser_roll}": loser_roll,
+                   "{payout}": format_chips(won), "{fee_line}": fee_text},
+                **member_replacements(winner, "winner"), **member_replacements(loser, "loser")))
+        await safe_send(challenge.thread, **message)
 
 
 def setup(client):

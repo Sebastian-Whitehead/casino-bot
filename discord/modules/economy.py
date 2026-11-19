@@ -1,5 +1,6 @@
 import random
 import sqlite3
+import time
 from functools import wraps
 from typing import Tuple, List
 from modules.bank import LocalBank
@@ -68,11 +69,13 @@ class Economy:
     def get_chips(self, user_id: int) -> int:
         return self.get_entry(user_id)[2]
 
-    def _adjust_chips(self, pairs):
-        """Apply [(uid, delta)] in one transaction."""
+    def _adjust_chips(self, pairs, statements=()):
+        """Apply [(uid, delta)] plus extra [(sql, params)] in one transaction."""
         try:
             for uid, delta in pairs:
                 self.cur.execute("UPDATE economy SET credits=credits+? WHERE user_id=?", (delta, uid))
+            for sql, params in statements:
+                self.cur.execute(sql, params)
             self.conn.commit()
         except Exception:
             self.conn.rollback()
@@ -117,6 +120,52 @@ class Economy:
         self._check(n)
         self.get_entry(user_id)
         self._adjust_chips([(self.casino_user_id, -n), (user_id, n)])
+
+    # --- wagers: every bet is held under a game id until it is settled or refunded ---
+
+    def open_wager(self, game_id: str, user_id: int, game: str, amount: int) -> None:
+        """Withdraw the stake from the player's chips into the casino, recorded under game_id.
+        Raises InsufficientFundsException; a second open for the same (game_id, user) raises IntegrityError."""
+        self._check(amount)
+        have = self.get_chips(user_id)
+        if have < amount:
+            raise InsufficientFundsException(have, amount)
+        self._adjust_chips(
+            [(user_id, -amount), (self.casino_user_id, amount)],
+            [("INSERT INTO wagers(game_id, user_id, game, amount, created_at) VALUES(?,?,?,?,?)",
+              (game_id, user_id, game, amount, time.time()))])
+
+    def _close_wager(self, game_id, user_id, status, payout_for):
+        """Close an open wager once; returns False if it was already closed (idempotent)."""
+        row = self.cur.execute("SELECT amount, status FROM wagers WHERE game_id=? AND user_id=?",
+                               (game_id, user_id)).fetchone()
+        if row is None:
+            raise KeyError(f"no wager {game_id!r} for user {user_id}")
+        amount, current = row
+        if current != 'open':
+            return False
+        payout = payout_for(amount)
+        pairs = [(self.casino_user_id, -payout), (user_id, payout)] if payout > 0 else []
+        self.get_entry(user_id)
+        self._adjust_chips(pairs, [(
+            "UPDATE wagers SET status=?, payout=?, closed_at=? WHERE game_id=? AND user_id=? AND status='open'",
+            (status, payout, time.time(), game_id, user_id))])
+        return True
+
+    def settle_wager(self, game_id: str, user_id: int, payout: int) -> bool:
+        """Pay `payout` chips (total returned, 0 on a loss) and close the wager. False if already closed."""
+        if type(payout) is not int or payout < 0:
+            raise ValueError(f"payout must be a non-negative int, got {payout!r}")
+        return self._close_wager(game_id, user_id, 'settled', lambda amount: payout)
+
+    def refund_wager(self, game_id: str, user_id: int) -> bool:
+        """Return the stake and close the wager. False if already closed."""
+        return self._close_wager(game_id, user_id, 'refunded', lambda amount: amount)
+
+    def refund_open_wagers(self) -> int:
+        """Refund every still-open wager (their games died with the previous process). Returns the count."""
+        rows = self.cur.execute("SELECT game_id, user_id FROM wagers WHERE status='open'").fetchall()
+        return sum(self.refund_wager(g, u) for g, u in rows)
 
     def _ensure_casino_entry(self):
         self.cur.execute(
@@ -167,6 +216,18 @@ class Economy:
             user_id INTEGER NOT NULL PRIMARY KEY,
             money INTEGER NOT NULL DEFAULT 0,
             credits INTEGER NOT NULL DEFAULT 0
+        )""")
+        # one row per (game, player) stake; status moves open -> settled | refunded exactly once
+        self.cur.execute("""CREATE TABLE IF NOT EXISTS wagers (
+            game_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            game TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            payout INTEGER,
+            created_at REAL NOT NULL,
+            closed_at REAL,
+            PRIMARY KEY (game_id, user_id)
         )""")
 
     def close(self):

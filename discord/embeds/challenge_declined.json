@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "{game} Challenge Declined",
+      "description": "{user} declined. No chips were taken.",
+      "color": 15158332
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "{game} Challenge Cancelled",
+      "description": "A player no longer has enough chips. No chips were taken.",
+      "color": 15158332
+    }
+  ]
+}

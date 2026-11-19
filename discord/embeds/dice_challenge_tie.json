@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "Dice Roll: Tie",
+      "description": "Both players rolled **{roll}**.\nBoth {bet} bets were refunded.",
+      "color": 3447003
+    }
+  ]
+}

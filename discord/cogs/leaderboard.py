@@ -1,6 +1,6 @@
 import nextcord as discord
 from nextcord.ext import commands
-from modules.game_ui import format_chips
+from modules.game_ui import ensure_casino_channel, format_chips
 from modules.helpers import TEST_GUILD_ID
 
 class Leaderboard(commands.Cog):
@@ -12,6 +12,8 @@ class Leaderboard(commands.Cog):
         **({"guild_ids": [TEST_GUILD_ID]})
     )
     async def casino_leaderboard(self, interaction: discord.Interaction) -> None:
+        if not await ensure_casino_channel(interaction):
+            return
         from modules.economy import Economy
         econ = Economy()
         # entries are (user_id, money, chips); the casino account is excluded

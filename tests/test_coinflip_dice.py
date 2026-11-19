@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import uuid
 from types import SimpleNamespace
 from unittest import mock
 
@@ -58,16 +59,19 @@ class Challenge(unittest.TestCase):
         self.eco = self.cog.economy
 
     def _stake(self, a, b, bet):
+        """Open both wagers under one game id; returns a challenge-like object."""
+        game_id = uuid.uuid4().hex
         for u in (a, b):
-            self.eco.place_bet(u.id, bet)
+            self.eco.open_wager(game_id, u.id, "Coin Flip", bet)
+        return SimpleNamespace(challenger=a, opponent=b, bet=bet, game_id=game_id)
 
     def _fee(self, pot_bet, pct):
         with mock.patch.object(challenge_mod, "CHALLENGE_FEE_ENABLED", True), \
              mock.patch.object(challenge_mod, "CHALLENGE_FEE_PERCENT", pct):
             a, b = user(2001, 1000), user(2002, 1000)
-            self._stake(a, b, pot_bet)
+            ch = self._stake(a, b, pot_bet)
             before = self.eco.get_chips(a.id)
-            paid, fee = self.cog.settle_challenge(a.id, pot_bet)
+            paid, fee = self.cog.settle_challenge(ch, a, b)
             self.assertEqual(self.eco.get_chips(a.id) - before, paid)
             self.assertEqual(paid + fee, pot_bet * 2)
             return paid, fee
@@ -82,14 +86,16 @@ class Challenge(unittest.TestCase):
              mock.patch.object(challenge_mod, "CHALLENGE_FEE_PERCENT", 5):
             a, b = user(2003, 100), user(2004, 100)
             total = sum(self.eco.get_chips(x) for x in (a.id, b.id, CASINO))
-            self._stake(a, b, 50)
-            self.cog.settle_challenge(a.id, 50)
+            ch = self._stake(a, b, 50)
+            self.cog.settle_challenge(ch, a, b)
             self.assertEqual(sum(self.eco.get_chips(x) for x in (a.id, b.id, CASINO)), total)
 
     def test_refund_pays_both_back(self):
         a, b = user(2005, 30), user(2006, 40)
-        self._stake(a, b, 10)
-        self.cog.refund_challenge(SimpleNamespace(challenger=a, opponent=b, bet=10))
+        ch = self._stake(a, b, 10)
+        self.cog.refund_challenge(ch)
+        self.assertEqual((self.eco.get_chips(a.id), self.eco.get_chips(b.id)), (30, 40))
+        self.cog.refund_challenge(ch)  # a second refund must not pay again
         self.assertEqual((self.eco.get_chips(a.id), self.eco.get_chips(b.id)), (30, 40))
 
 

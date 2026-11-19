@@ -74,7 +74,7 @@ class BettingView(BaseBettingView):
                     await safe_send(self.thread, content=f"Auto-spin stopped: you need {format_chips(self.bet)} to spin "
                                                          f"(you have {format_chips(self.get_balance())}).")
                     break
-                await self.cog.start_round(self, _AutoInteraction())
+                await self.cog.start_round(self, _AutoInteraction(), confirmed=True)
                 spun = True
         except Exception as e:
             print(f"[Slots] Auto-spin error: {e!r}")

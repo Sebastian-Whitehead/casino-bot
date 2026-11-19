@@ -52,6 +52,9 @@ async def on_ready() -> None:
     """Bot startup event."""
     logger.info(f'Logged in as {client.user}')
     Economy().bind_casino_user(client.user.id)
+    refunded = Economy().refund_open_wagers()  # games from the previous run died with it
+    if refunded:
+        logger.info(f'Refunded {refunded} open wager(s) left by the previous run')
     # Start background task for auto-deleting dormant threads
     if ENABLE_AUTO_THREAD_CLEANUP:
         setup_auto_thread_cleanup(client)

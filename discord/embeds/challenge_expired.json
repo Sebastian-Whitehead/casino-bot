@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "{game} Challenge Expired",
+      "description": "{opponent} did not respond in time. No chips were taken.",
+      "color": 15158332
+    }
+  ]
+}

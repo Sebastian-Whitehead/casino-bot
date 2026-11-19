@@ -50,6 +50,7 @@ CASINO_USER_ID = config.get('casino_user_id', 0)
 RESTRICT_TO_CASINO_CHANNEL = config.get('restrict_to_casino_channel', True)
 CHALLENGE_FEE_ENABLED = config.get('challenge_fee_enabled', True)
 CHALLENGE_FEE_PERCENT = config.get('challenge_fee_percent', 5)
+CONFIRM_BETS = config.get('confirm_bets', True)
 
 
 def payout(bet: int, mult) -> int:

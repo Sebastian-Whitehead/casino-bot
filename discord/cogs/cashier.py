@@ -3,13 +3,12 @@ from nextcord import ui, ButtonStyle, Interaction
 from nextcord.ext import commands
 
 from modules.economy import Economy
-from modules.game_ui import format_chips
+from modules.game_ui import ensure_casino_channel, format_chips
 from modules.helpers import (
-    CASINO_CHANNEL_ID, CHIP_VALUE, RESTRICT_TO_CASINO_CHANNEL, TEST_GUILD_ID,
+    CHIP_VALUE, TEST_GUILD_ID,
     InsufficientFundsException, make_embed,
 )
 
-WRONG_CHANNEL = "This command can only be used in the designated casino channel."
 
 
 def do_buy(economy, uid: int, n: int):
@@ -34,10 +33,6 @@ def do_cash_out(economy, uid: int, n: int):
 
 def balances_text(economy, uid: int) -> str:
     return f"Bank: ${economy.bank.balance(uid):,}\nWallet: {format_chips(economy.get_chips(uid))}"
-
-
-def channel_ok(interaction) -> bool:
-    return not RESTRICT_TO_CASINO_CHANNEL or interaction.channel.id == CASINO_CHANNEL_ID
 
 
 class CashierView(ui.View):
@@ -147,16 +142,16 @@ class Cashier(commands.Cog):
 
     @nextcord.slash_command(name="cashier", description="Buy chips or cash them out.", guild_ids=[TEST_GUILD_ID])
     async def cashier(self, interaction: Interaction):
-        if not channel_ok(interaction):
-            return await interaction.response.send_message(WRONG_CHANNEL, ephemeral=True)
+        if not await ensure_casino_channel(interaction):
+            return
         view = CashierView(interaction.user, self.economy)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
         view.message = await interaction.original_message()
 
     @nextcord.slash_command(name="buy", description="Buy chips with your bank money.", guild_ids=[TEST_GUILD_ID])
     async def buy(self, interaction: Interaction, amount: int = nextcord.SlashOption(description="Chips to buy")):
-        if not channel_ok(interaction):
-            return await interaction.response.send_message(WRONG_CHANNEL, ephemeral=True)
+        if not await ensure_casino_channel(interaction):
+            return
         if amount < 1:
             return await interaction.response.send_message("Amount must be at least 1 chip.", ephemeral=True)
         _, msg = do_buy(self.economy, interaction.user.id, amount)
@@ -165,8 +160,8 @@ class Cashier(commands.Cog):
     @nextcord.slash_command(name="cashout", description="Cash chips out to bank money.", guild_ids=[TEST_GUILD_ID])
     async def cashout(self, interaction: Interaction,
                       amount: str = nextcord.SlashOption(description="Number of chips, or 'all'")):
-        if not channel_ok(interaction):
-            return await interaction.response.send_message(WRONG_CHANNEL, ephemeral=True)
+        if not await ensure_casino_channel(interaction):
+            return
         uid = interaction.user.id
         n = parse_cashout(amount, self.economy.get_chips(uid))
         if n is None:
@@ -176,8 +171,8 @@ class Cashier(commands.Cog):
 
     @nextcord.slash_command(name="balance", description="Show your bank money and chips.", guild_ids=[TEST_GUILD_ID])
     async def balance(self, interaction: Interaction, user: nextcord.Member = None):
-        if not channel_ok(interaction):
-            return await interaction.response.send_message(WRONG_CHANNEL, ephemeral=True)
+        if not await ensure_casino_channel(interaction):
+            return
         user = user or interaction.user
         embed = make_embed(title=f"{user.display_name}'s Balance", description=balances_text(self.economy, user.id))
         embed.set_thumbnail(url=user.display_avatar.url)

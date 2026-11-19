@@ -13,6 +13,7 @@ class BaseBettingView(ui.View):
         self.thread = thread
         self.bet_message = None
         self.game_message = None
+        self.game_id = None  # id of the wager currently in play (set by BaseGameCog.begin_wager)
 
     def get_balance(self) -> int:
         return self.cog.economy.get_chips(self.user.id)

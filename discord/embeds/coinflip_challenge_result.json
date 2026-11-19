@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "Coin Flip: {result}",
+      "description": "{winner} wins against {loser}!\n{challenger} had heads; {opponent} had tails.\nPayout: {payout}{fee_line}",
+      "color": 3066993
+    }
+  ]
+}

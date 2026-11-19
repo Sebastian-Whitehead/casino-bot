@@ -1,0 +1,10 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "Confirm your bet",
+      "description": "{game}: **{bet}**{choice_line}\nWallet: {wallet}\nThe bet is taken from your chips when you confirm.",
+      "color": 15844367
+    }
+  ]
+}

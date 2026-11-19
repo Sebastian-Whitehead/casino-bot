@@ -28,6 +28,7 @@ bot:
   blackjack_blackjack_multiplier: 2.5 # payout for player blackjack (default 2.5)
   challenge_fee_enabled: true # Take a fee from the combined challenge pot
   challenge_fee_percent: 5 # Percentage of the combined challenge pot kept by the casino
+  confirm_bets: true # Ask the player to confirm each bet before chips are taken (Play Again and auto-spin skip it)
   # slots_multipliers: List of payout multipliers for each slot symbol, in order:
   #   [cherry, seven, bell, bar, lemon, grape]
   #   e.g. [4, 80, 40, 25, 10, 5] means:

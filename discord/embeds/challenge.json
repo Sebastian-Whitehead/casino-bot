@@ -1,0 +1,10 @@
+{
+  "content": "{opponent}",
+  "embeds": [
+    {
+      "title": "{game} Challenge",
+      "description": "{challenger} challenged {opponent}!\nEach player bets **{bet}**.\n{opponent}, accept or decline below. This expires in 2 minutes.",
+      "color": 15844367
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import os
 
 import nextcord
 import nextcord as discord
+from modules.game_ui import ensure_casino_channel
 from modules.helpers import ABS_PATH, make_embed
 from nextcord.ext import commands
 import os
@@ -18,6 +19,8 @@ class Help(commands.Cog, name='help'):
         guild_ids=[TEST_GUILD_ID]
     )
     async def help(self, interaction: nextcord.Interaction):
+        if not await ensure_casino_channel(interaction):
+            return
         embed = make_embed(title="Casino Bot Slash Commands")
         embed.add_field(
             name="/blackjack",
