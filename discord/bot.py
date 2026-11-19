@@ -128,9 +128,9 @@ async def add_casino_money(interaction: discord.Interaction, amount: int) -> Non
 
 
 
-# Load all cogs except legacy_gambling.py
+# Load all cogs
 for filename in os.listdir(COG_FOLDER):
-    if filename.endswith('.py') and filename != 'legacy_gambling.py':
+    if filename.endswith('.py'):
         client.load_extension(f'cogs.{filename[:-3]}')
 # Ensure leaderboard cog is loaded (if not already in folder)
 #try:

@@ -1,24 +1,15 @@
-Completed:
-- [x] Dice roll UI fixed
-- [x] Wallet refreshes after games
-- [x] Slots Start button restored
-- [x] Coinflip and dice challenge games added
-- [x] Casino balance bound to the bot user ID
+Done (chips + cashier work, see plan.md):
+- [x] Chips for all games, /cashier /buy /cashout, strict economy ops
+- [x] Shared betting/result framework for all games
+- [x] Thread cleanup rewritten (verify live), unknown-command crash fixed
+- [x] Coinflip and dice challenges
 
-Still Open:
-- [ ] Thread tidy up is finding but not deleting threads
+To verify live in the test guild (checklist at the end of plan.md):
+- [ ] Thread cleanup actually deletes expired threads
+- [ ] /cashier buy and cash out, /buy, /cashout, challenges, slots auto-spin
 
-Nice to have:
-- [x] Allow buying and selling of slots credits in slots thread
-
-Future Features:
-- [ ] Roulette
-- [ ] Horse Race Betting
-
-Planned Infrastructure:
-- [ ] Implement the economy-service plan in `economy_service_plan.md`
-- [ ] Extract the economy into a standalone Dockerized service
-- [ ] Put a shared economy API between the bot and future tools
-- [ ] Prefer PostgreSQL for concurrent clients instead of direct SQLite access
-- [ ] Migrate the existing economy.db data into the service
-- [ ] Add transaction safety, an immutable ledger, idempotent game settlement, and client authentication
+Next:
+- [ ] Supabase bank: implement the Bank seam (modules/bank.py) against the shared economy
+- [ ] Immutable ledger and idempotent settlement (economy_service_plan.md)
+- [ ] Daily buy-in cap, session summary (net result per session)
+- [ ] Roulette, Horse Race Betting

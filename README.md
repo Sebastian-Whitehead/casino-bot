@@ -1,7 +1,7 @@
 # Casino Bot
 Casino bot is a gambling discord bot I made for my friends.
 
-It is able to play blackjack, slots, flip a coin, and roll dice. It stores everyone's money on an SQLite3 database.
+It plays blackjack, slots, coinflip and dice (plus player-vs-player coinflip and dice challenges). Players buy chips with bank money (`/cashier`, `/buy`, `/cashout`) and every game bets chips. Balances are stored in an SQLite3 database.
 
 Feel free to download and use for yourself!
 
@@ -15,5 +15,5 @@ Feel free to download and use for yourself!
 3. Clone the repository
 4. Install requirements from [requirements.txt](requirements.txt)
 5. Configure [config.yml](config.yml)
-6. Run it
+6. Run it: `python discord/bot.py`, or `docker compose up -d --build`
 
