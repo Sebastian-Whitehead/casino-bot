@@ -1,6 +1,7 @@
 import asyncio
 import bisect
 import io
+import logging
 import os
 import random
 
@@ -10,12 +11,65 @@ from nextcord.ext import commands
 from PIL import Image
 
 from modules.base_betting_view import BaseBettingView
+from modules.economy import Economy
 from modules.base_game_cog import BaseGameCog, Outcome
 from modules.game_ui import GameResultView, format_chips, safe_edit, safe_send
-from modules.helpers import SLOTS_DEFAULT_BET, SLOTS_MULTS, TEST_GUILD_ID, payout
+from modules.helpers import SLOTS_DEFAULT_BET, SLOTS_MULTS, SLOTS_WIN_RATE, GUILD_KW, make_embed, payout
 
-USE_TEST_GUILD = False  # Set to True for fast test registration
 AUTO_SPIN_DELAY = 5
+SYMBOLS = ["Lemon", "Seven", "Diamond", "Coin", "Bell", "Cherry"]  # index = reel_symbols() value = SLOTS_MULTS index
+
+
+def paytable_embed(bet):
+    rows = sorted(range(len(SLOTS_MULTS)), key=lambda i: -SLOTS_MULTS[i])
+    lines = [f"{SYMBOLS[i]} x3: {SLOTS_MULTS[i]}x = {format_chips(payout(bet, SLOTS_MULTS[i]))}" for i in rows]
+    return make_embed(title="Slots paytable",
+                      description=f"Three matching symbols win. Payouts for a {format_chips(bet)} bet:\n" + "\n".join(lines))
+log = logging.getLogger(__name__)
+
+
+ASSETS = os.path.join(os.path.dirname(__file__), '..', 'modules')
+ITEM = 180  # height of one symbol on the reel strip
+_images = {}
+
+
+def _image(name):
+    if name not in _images:
+        _images[name] = Image.open(f'{ASSETS}/{name}').convert('RGBA')
+    return _images[name]
+
+
+def pick_reels(rng=random):
+    """Three reel stops. A small chance of a forced weighted win; otherwise the reels are independent."""
+    items = _image('slot-reel.png').size[1] // ITEM
+    s = [rng.randint(1, items - 1) for _ in range(3)]
+    if rng.random() < SLOTS_WIN_RATE:
+        pos = bisect.bisect([3.5, 7, 15, 25, 55], round(rng.random() * 100, 1))
+        s = [pos + rng.randint(1, int(items / 6 - 1)) * 6 for _ in range(3)]
+        s = [x - 6 if x == items else x for x in s]
+    return s
+
+
+def reel_symbols(*stops):
+    """Symbol 0-5 shown on each reel (index into SLOTS_MULTS)."""
+    return tuple((1 + x) % 6 for x in stops)
+
+
+def render_spin(s1, s2, s3) -> io.BytesIO:
+    facade, reel = _image('slot-face.png'), _image('slot-reel.png')
+    rw = reel.size[0]
+    speed = 6
+    images = []
+    for i in range(1, ITEM // speed + 1):
+        bg = Image.new('RGBA', facade.size, color=(255, 255, 255))
+        for n, stop in enumerate((s1, s2, s3)):
+            bg.paste(reel, (25 + rw * n, 100 - speed * i * stop))
+        bg.alpha_composite(facade)
+        images.append(bg)
+    buf = io.BytesIO()  # in memory: no temp file to leak
+    images[0].save(buf, format='GIF', save_all=True, append_images=images[1:], duration=50)
+    buf.seek(0)
+    return buf
 
 
 class _AutoInteraction:
@@ -32,6 +86,7 @@ class BettingView(BaseBettingView):
         super().__init__(cog, user, bet, thread)
         self.auto_spin = False
         self.auto_task = None
+        self.in_round = False  # a spin is running: ignore extra Start clicks
         self._auto_stop_event = asyncio.Event()
 
     @ui.button(label="Auto", style=ButtonStyle.secondary, row=2, custom_id="slots_auto_spin")
@@ -44,6 +99,10 @@ class BettingView(BaseBettingView):
             self._auto_stop_event.clear()
             self.auto_task = asyncio.create_task(self.auto_spin_loop())
         await interaction.response.edit_message(view=self)
+
+    @ui.button(label="Paytable", style=ButtonStyle.secondary, row=2, custom_id="slots_paytable")
+    async def show_paytable(self, button, interaction: Interaction):
+        await interaction.response.send_message(embed=paytable_embed(self.bet), ephemeral=True)
 
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="slots_start")
     async def start_spin(self, button, interaction: Interaction):
@@ -77,7 +136,7 @@ class BettingView(BaseBettingView):
                 await self.cog.start_round(self, _AutoInteraction(), confirmed=True)
                 spun = True
         except Exception as e:
-            print(f"[Slots] Auto-spin error: {e!r}")
+            log.error("[Slots] Auto-spin error: %r", e)
         finally:
             self.stop_auto()
             self.auto_task = None
@@ -90,56 +149,39 @@ class Slots(BaseGameCog, commands.Cog):
 
     def __init__(self, client: commands.Bot):
         self.client = client
-        from modules.economy import Economy
         self.economy = Economy()
         self.active_games = {}  # {thread_id: BettingView}
         self.default_bet = SLOTS_DEFAULT_BET
 
     @discord.slash_command(
         description="Play the slot machine. Three matching symbols win.",
-        **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+        **GUILD_KW
     )
     async def slots(self, interaction: discord.Interaction):
         await self.open_game(interaction, BettingView)
 
+    @discord.slash_command(description="Show what each slots symbol pays.", **GUILD_KW)
+    async def slots_paytable(self, interaction: discord.Interaction):
+        await interaction.response.send_message(embed=paytable_embed(self.default_bet), ephemeral=True)
+
+    async def start_round(self, betting_view, interaction, confirmed=False, **choice):
+        if betting_view.in_round:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            return
+        betting_view.in_round = True
+        try:
+            await super().start_round(betting_view, interaction, confirmed, **choice)
+        finally:
+            betting_view.in_round = False
+
     async def play(self, betting_view, interaction, **choice) -> Outcome:
         bet = betting_view.bet
-        path = os.path.join(os.path.dirname(__file__), '..', 'modules')
-        facade = Image.open(f'{path}/slot-face.png').convert('RGBA')
-        reel = Image.open(f'{path}/slot-reel.png').convert('RGBA')
-        rw, rh = reel.size
-        item = 180
-        items = rh // item
-        s1 = random.randint(1, items-1)
-        s2 = random.randint(1, items-1)
-        s3 = random.randint(1, items-1)
-        win_rate = 12/100
-        if random.random() < win_rate:
-            symbols_weights = [3.5, 7, 15, 25, 55]
-            x = round(random.random()*100, 1)
-            pos = bisect.bisect(symbols_weights, x)
-            s1 = pos + (random.randint(1, int((items/6)-1)) * 6)
-            s2 = pos + (random.randint(1, int((items/6)-1)) * 6)
-            s3 = pos + (random.randint(1, int((items/6)-1)) * 6)
-            s1 = s1 - 6 if s1 == items else s1
-            s2 = s2 - 6 if s2 == items else s2
-            s3 = s3 - 6 if s3 == items else s3
-        images = []
-        speed = 6
-        for i in range(1, (item//speed)+1):
-            bg = Image.new('RGBA', facade.size, color=(255,255,255))
-            bg.paste(reel, (25 + rw*0, 100-(speed * i * s1)))
-            bg.paste(reel, (25 + rw*1, 100-(speed * i * s2)))
-            bg.paste(reel, (25 + rw*2, 100-(speed * i * s3)))
-            bg.alpha_composite(facade)
-            images.append(bg)
-        fp = f'{betting_view.user.id}_slots.gif'
-        buf = io.BytesIO()  # in memory: no temp file to leak
-        images[0].save(buf, format='GIF', save_all=True, append_images=images[1:], duration=50)
-        buf.seek(0)
-        file = discord.File(buf, filename=fp)
-        # (1+s1)%6 gets the symbol 0-5 inclusive
-        symbols = ((1+s1)%6, (1+s2)%6, (1+s3)%6)
+        s1, s2, s3 = pick_reels()
+        # GIF building is CPU-heavy: keep it off the event loop so other commands stay responsive
+        buf = await asyncio.to_thread(render_spin, s1, s2, s3)
+        file = discord.File(buf, filename=f'{betting_view.user.id}_slots.gif')
+        symbols = reel_symbols(s1, s2, s3)
         if symbols[0] == symbols[1] == symbols[2]:
             return Outcome(True, payout(bet, SLOTS_MULTS[symbols[0]]), "Slots: three of a kind!",
                            file=file)

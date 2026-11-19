@@ -1,12 +1,16 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import logging
 import uuid
 
 import nextcord
 from nextcord import ButtonStyle, ui
+from modules.embed_processor import member_replacements, render_embed
 from modules.game_ui import (GameResultView, build_result_embed, ensure_casino_channel,
-                             format_chips, safe_edit, safe_send)
+                             format_chips, safe_delete, safe_edit, safe_send)
+
+log = logging.getLogger(__name__)
 
 DEFAULT_INSUFFICIENT = ("You don't have enough chips for this bet "
                         "(you have {balance}, bet is {bet}). Use /cashier or /buy to get more.")
@@ -80,7 +84,7 @@ class BettingGameCog:
             else:
                 await interaction.followup.send(text, ephemeral=True)
         except Exception as e:
-            print(f"[{self.__class__.__name__}] Error sending bet message: {e}")
+            log.warning("[%s] Error sending bet message: %s", self.__class__.__name__, e)
 
     async def validate_wager(self, betting_view, interaction, insufficient_message=DEFAULT_INSUFFICIENT) -> bool:
         """Step 1."""
@@ -98,7 +102,6 @@ class BettingGameCog:
 
     async def confirm_wager(self, betting_view, interaction, choice):
         """Step 2. Returns the interaction to carry on with (the Confirm press), or None if cancelled / timed out."""
-        from modules.embed_processor import member_replacements, render_embed
         choice_text = self.describe_choice(choice)
         message = render_embed("bet_confirm", {
             "{game}": self.game_name, "{bet}": format_chips(betting_view.bet),
@@ -131,11 +134,7 @@ class BettingGameCog:
             return None
         betting_view.game_id = game_id
         await betting_view.refresh_bet_message()
-        if betting_view.game_message:
-            try:
-                await betting_view.game_message.delete()
-            except Exception:
-                pass
+        await safe_delete(betting_view.game_message)
         return game_id, interaction
 
 
@@ -150,7 +149,7 @@ class BaseGameCog(BettingGameCog):
         try:
             await interaction.response.send_message("Game started!", ephemeral=True)
         except Exception as e:
-            print(f"[{self.game_name}] Error sending game started: {e}")
+            log.warning("[%s] Error sending game started: %s", self.game_name, e)
             return None
         thread = await interaction.channel.create_thread(
             name=thread_name or f"{self.game_name} - {interaction.user.display_name}",
@@ -189,9 +188,9 @@ class BaseGameCog(BettingGameCog):
             return
         net = outcome.payout - view.bet
         wallet = self.economy.get_chips(user_id)
-        print(f"[{self.game_name}] Game: {game_id}, User: {view.user} (ID: {user_id}), Bet: {view.bet}, "
-              f"Result: {'win' if outcome.won else 'loss/push'}, Payout: {outcome.payout}, "
-              f"Net: {net}, Wallet: {wallet}")
+        log.info("[%s] Game: %s, User: %s (ID: %s), Bet: %s, Result: %s, Payout: %s, Net: %s, Wallet: %s",
+                 self.game_name, game_id, view.user, user_id, view.bet,
+                 'win' if outcome.won else 'loss/push', outcome.payout, net, wallet)
         embed = build_result_embed(outcome.title, outcome.won, net, wallet, outcome.description)
         embed.set_footer(text=f"Game {game_id}")
         kw = {"embed": embed, "view": (outcome.view_cls or GameResultView)(self, view, replay_kwargs)}
@@ -205,7 +204,7 @@ class BaseGameCog(BettingGameCog):
         view = self.active_games.pop(thread_id, None)
         if not view:
             return
-        for step in (lambda: view.game_message.delete() if view.game_message else None,
+        for step in (lambda: safe_delete(view.game_message),
                      lambda: safe_edit(view.bet_message, view=None) if view.bet_message else None,
                      lambda: view.thread.send("Game ended due to inactivity."),
                      lambda: view.thread.edit(archived=True, locked=True)):

@@ -10,7 +10,6 @@ def claim_bonus(economy, user_id: int, now: float = None):
     """Grant the bonus unless on cooldown. Returns (granted, seconds_remaining, amount)."""
     now = time.time() if now is None else now
     amount = DEFAULT_BET * B_MULT * CHIP_VALUE
-    economy.cur.execute("CREATE TABLE IF NOT EXISTS bonus_claims (user_id INTEGER PRIMARY KEY, ts REAL NOT NULL)")
     row = economy.cur.execute("SELECT ts FROM bonus_claims WHERE user_id=?", (user_id,)).fetchone()
     if row and now - row[0] < B_COOLDOWN * 3600:
         return False, int(B_COOLDOWN * 3600 - (now - row[0])), amount
@@ -70,7 +69,7 @@ class GamblingHelpers(commands.Cog, name='General'):
             user = self.client.get_user(uid)
             embed.add_field(
                 name=f"{i+1}. {user.name if user else uid}",
-                value=f"{chips:,} chips + ${money:,}",
+                value=f"{chips:,} chips + {self.economy.bank.display(uid)}",
                 inline=False
             )
         await ctx.send(embed=embed)

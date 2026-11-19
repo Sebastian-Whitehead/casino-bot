@@ -53,6 +53,21 @@ class ViewIds(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coinflip.CoinFlipBettingView.min_bet, helpers.COINFLIP_MIN_BET)
 
 
+class Rematch(unittest.IsolatedAsyncioTestCase):
+    async def test_presser_challenges_the_other_player_in_the_parent_channel(self):
+        cog = make_cog(coinflip.CoinFlip)
+        a, b = user(3001, 50), user(3002, 50)
+        parent = mock.Mock()
+        ch = SimpleNamespace(challenger=a, opponent=b, bet=5, game_name="Coin Flip",
+                             thread=SimpleNamespace(parent=parent))
+        cog.open_challenge = mock.AsyncMock(return_value=object())
+        view = challenge_mod.RematchView(cog, ch)
+        i = mock.Mock(user=b, message=mock.Mock(edit=mock.AsyncMock()))
+        await view.rematch.callback(i)
+        cog.open_challenge.assert_awaited_once_with(i, a, 5, "Coin Flip", channel=parent)
+        self.assertFalse(await view.interaction_check(mock.Mock(user=SimpleNamespace(id=9))))
+
+
 class Challenge(unittest.TestCase):
     def setUp(self):
         self.cog = make_cog(coinflip.CoinFlip)

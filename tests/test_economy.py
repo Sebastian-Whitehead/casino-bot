@@ -77,8 +77,6 @@ class EconomyTest(unittest.TestCase):
         self.assertEqual((self.e.bank.balance(U), self.e.get_chips(U)), (5 * CHIP_VALUE, 0))
         with self.assertRaises(InsufficientFundsException):
             self.e.cash_out(U, 1)
-        with self.assertRaises(InsufficientFundsException):
-            self.e.place_bet(U, 1)
         self.assertEqual((self.e.bank.balance(U), self.e.get_chips(U)), (5 * CHIP_VALUE, 0))
 
     def test_zero_negative_and_non_int_rejected(self):
@@ -86,7 +84,7 @@ class EconomyTest(unittest.TestCase):
         self.e.set_chips(U, 10)
         for bad in (0, -3, 1.5, True, "2"):
             self.assertFalse(self.e.buy_chips(U, bad))
-            for fn in (self.e.cash_out, self.e.place_bet, self.e.pay_out):
+            for fn in (self.e.cash_out,):
                 with self.assertRaises(ValueError):
                     fn(U, bad)
         self.assertEqual((self.e.bank.balance(U), self.e.get_chips(U)), (1000, 10))
@@ -116,11 +114,11 @@ class EconomyTest(unittest.TestCase):
         self.e.bank.set_balance(U, 100)
         self.e.buy_chips(U, 10)
         total = self.total_chips()
-        self.e.place_bet(U, 4)
+        self.e.open_wager("g", U, "Slots", 4)
         self.assertEqual(self.e.get_chips(U), 6)
         self.assertEqual(self.e.get_chips(self.cid), 4)
-        self.e.pay_out(U, payout(4, 1.5))
-        self.assertEqual(self.e.get_chips(U), 12)
+        self.e.settle_game("g", {U: payout(4, 3.5)})
+        self.assertEqual(self.e.get_chips(U), 20)
         self.assertEqual(self.total_chips(), total)
 
     def test_wager_open_settle_is_idempotent(self):
@@ -200,6 +198,36 @@ class EconomyTest(unittest.TestCase):
         self.assertEqual(self.log("duel"), [(U, 5, 0, "loss", "222", "Coin Flip"),
                                             (222, 5, 9, "win", "222", "Coin Flip")])
         self.assertEqual((self.e.get_chips(U), self.e.get_chips(222)), (0, 9))
+
+    def test_leaderboards_view_ranks_by_net(self):
+        self.e.get_entry(222)
+        self.e.set_chips(U, 5)
+        self.e.set_chips(222, 5)
+        self.e.open_wager("duel", U, "Coin Flip", 5)
+        self.e.open_wager("duel", 222, "Coin Flip", 5)
+        self.e.settle_game("duel", {222: 9, U: 0})
+        rows = self.e.cur.execute(
+            "SELECT user_id, games, winnings, losses, net, rank FROM leaderboards ORDER BY rank").fetchall()
+        self.assertEqual(rows, [(222, 1, 4, 0, 4, 1), (U, 1, 0, 5, -5, 2)])
+
+    def test_game_leaderboard_is_per_game(self):
+        self.e.set_chips(U, 20)
+        for gid, game, pay in (("a", "Slots", 10), ("b", "Dice Roll", 0)):
+            self.e.open_wager(gid, U, game, 5)
+            self.e.settle_game(gid, {U: pay})
+        self.assertEqual(self.e.leaderboard(10, "Slots"), [(1, U, 5, 0, 5)])
+        self.assertEqual(self.e.leaderboard(10, "Dice Roll"), [(1, U, 0, 5, -5)])
+        self.assertEqual(self.e.leaderboard(10), [(1, U, 5, 5, 0)])
+
+    def test_test_mode_games_are_not_logged(self):
+        from modules import helpers
+        from unittest import mock
+        self.e.set_chips(U, 10)
+        with mock.patch.object(helpers, "TEST_MODE", True):
+            self.e.open_wager("t", U, "Slots", 5)
+            self.e.settle_game("t", {U: 10})
+        self.assertEqual(self.log("t"), [])
+        self.assertEqual(self.e.get_chips(U), 15)  # still paid out
 
     def test_game_log_tie_and_no_double_write(self):
         self.e.get_entry(222)

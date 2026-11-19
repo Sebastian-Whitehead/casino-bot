@@ -80,15 +80,38 @@ class ChallengeView(ui.View):
                         **render_embed("challenge_expired", self.replacements()))
 
 
+class RematchView(ui.View):
+    """Under a finished challenge: either player starts a new one, presser as challenger, same bet."""
+
+    def __init__(self, cog, challenge):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.challenge = challenge
+
+    async def interaction_check(self, interaction):
+        return interaction.user.id in (self.challenge.challenger.id, self.challenge.opponent.id)
+
+    @ui.button(label="Rematch", style=ButtonStyle.primary, custom_id="challenge_rematch")
+    async def rematch(self, button, interaction):
+        c = self.challenge
+        other = c.opponent if interaction.user.id == c.challenger.id else c.challenger
+        started = await self.cog.open_challenge(interaction, other, c.bet, c.game_name,
+                                                channel=c.thread.parent)
+        if started:  # one rematch per result
+            await safe_edit(interaction.message, view=None)
+            self.stop()
+
+
 class ChallengeGameCog(BaseGameCog):
     challenge_min_bet = 1  # per-game override
 
-    async def open_challenge(self, interaction, opponent, bet, game_name):
+    async def open_challenge(self, interaction, opponent, bet, game_name, channel=None):
+        """`channel`: where to create the thread (a rematch runs inside the old thread, so it passes the parent)."""
         async def reject(message):
             await interaction.response.send_message(message, ephemeral=True)
             return None
 
-        if not await ensure_casino_channel(interaction):
+        if channel is None and not await ensure_casino_channel(interaction):
             return None
         if opponent.id == interaction.user.id:
             return await reject("You cannot challenge yourself.")
@@ -105,7 +128,7 @@ class ChallengeGameCog(BaseGameCog):
         await interaction.response.send_message(
             f"{game_name} challenge created!", ephemeral=True
         )
-        thread = await interaction.channel.create_thread(
+        thread = await (channel or interaction.channel).create_thread(
             name=(
                 f"{game_name} - {interaction.user.display_name} "
                 f"vs {opponent.display_name}"
@@ -119,6 +142,28 @@ class ChallengeGameCog(BaseGameCog):
         challenge.challenge_message = await safe_send(
             thread, view=challenge, **render_embed("challenge", challenge.replacements()))
         return challenge
+
+    async def challenge_or_play(self, interaction, opponent, bet, view_cls):
+        """Shared /coinflip and /diceroll entry: both opponent and bet -> challenge, neither -> solo game."""
+        if opponent is None and bet is None:
+            return await self.open_game(interaction, view_cls)
+        if opponent is None or bet is None:
+            return await interaction.response.send_message(
+                "Provide both an opponent and a bet to create a challenge.", ephemeral=True)
+        return await self.open_challenge(interaction, opponent, bet, self.game_name)
+
+    async def finish_challenge(self, challenge, winner, loser, embed_name, **extra):
+        """Settle with the fee and post the result embed ({payout} {fee_line} winner_/loser_ names added)."""
+        won, fee = self.settle_challenge(challenge, winner, loser)
+        fee_line = f"\nCasino fee: {format_chips(fee)}" if fee else ""
+        replacements = challenge.replacements(
+            **{"{payout}": format_chips(won), "{fee_line}": fee_line}, **extra,
+            **member_replacements(winner, "winner"), **member_replacements(loser, "loser"))
+        await self.post_result(challenge, render_embed(embed_name, replacements))
+
+    async def post_result(self, challenge, message):
+        """Result embed with a Rematch button."""
+        await safe_send(challenge.thread, view=RematchView(self, challenge), **message)
 
     async def accept_challenge(self, challenge, interaction):
         if challenge.resolved:

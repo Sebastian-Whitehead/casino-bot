@@ -8,12 +8,10 @@ from modules.helpers import DEFAULT_BET, DICE_MULT, payout
 from modules.base_betting_view import BaseBettingView
 from modules.base_game_cog import Outcome
 from modules.challenge import ChallengeGameCog
-from modules.embed_processor import member_replacements, render_embed
-from modules.game_ui import format_chips, safe_send
+from modules.embed_processor import render_embed
 
 # --- TEST GUILD CONFIG FOR SLASH COMMANDS (local, like blackjack/slots) ---
-from modules.helpers import TEST_GUILD_ID
-USE_TEST_GUILD = True
+from modules.helpers import GUILD_KW
 
 
 class RollerBettingView(BaseBettingView):
@@ -45,7 +43,7 @@ class Roller(ChallengeGameCog, commands.Cog):
     @discord.slash_command(
         name="diceroll",
         description="Roll a die or challenge another user.",
-        **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+        **GUILD_KW
     )
     async def diceroll(
         self,
@@ -53,16 +51,7 @@ class Roller(ChallengeGameCog, commands.Cog):
         opponent: discord.Member = None,
         bet: int = None
     ):
-        if opponent is not None or bet is not None:
-            if opponent is None or bet is None:
-                await interaction.response.send_message(
-                    "Provide both an opponent and a bet to create a challenge.",
-                    ephemeral=True
-                )
-                return
-            await self.open_challenge(interaction, opponent, bet, self.game_name)
-            return
-        await self.open_game(interaction, RollerBettingView)
+        await self.challenge_or_play(interaction, opponent, bet, RollerBettingView)
 
     async def play(self, betting_view, interaction, guess):
         result = random.randint(1, 6)
@@ -79,21 +68,16 @@ class Roller(ChallengeGameCog, commands.Cog):
         opponent_roll = random.randint(1, 6)
         if challenger_roll == opponent_roll:
             self.tie_challenge(challenge)
-            message = render_embed("dice_challenge_tie",
-                                   challenge.replacements(**{"{roll}": challenger_roll}))
+            await self.post_result(challenge, render_embed(
+                "dice_challenge_tie", challenge.replacements(**{"{roll}": challenger_roll})))
         else:
             challenger_wins = challenger_roll > opponent_roll
             winner, loser = ((challenge.challenger, challenge.opponent) if challenger_wins
                              else (challenge.opponent, challenge.challenger))
             winner_roll, loser_roll = ((challenger_roll, opponent_roll) if challenger_wins
                                        else (opponent_roll, challenger_roll))
-            won, fee = self.settle_challenge(challenge, winner, loser)
-            fee_text = f"\nCasino fee: {format_chips(fee)}" if fee else ""
-            message = render_embed("dice_challenge_win", challenge.replacements(
-                **{"{winner_roll}": winner_roll, "{loser_roll}": loser_roll,
-                   "{payout}": format_chips(won), "{fee_line}": fee_text},
-                **member_replacements(winner, "winner"), **member_replacements(loser, "loser")))
-        await safe_send(challenge.thread, **message)
+            await self.finish_challenge(challenge, winner, loser, "dice_challenge_win",
+                                        **{"{winner_roll}": winner_roll, "{loser_roll}": loser_roll})
 
 
 def setup(client):

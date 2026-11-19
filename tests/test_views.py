@@ -71,6 +71,15 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(v.cap_bet(0), 2)
         self.assertEqual(v.cap_bet(1000), 100)
 
+    async def test_half_and_all_in_buttons(self):
+        v = FakeView(FakeGame(100, True), SimpleNamespace(id=1), 5, MagicMock())
+        i = make_interaction()
+        i.response.edit_message = AsyncMock()
+        await v.bet_max.callback(i)
+        self.assertEqual(v.bet, 100)
+        await v.bet_half.callback(i)
+        self.assertEqual(v.bet, 50)
+
     async def _run(self, win):
         cog = FakeGame(100, win)
         i = make_interaction()

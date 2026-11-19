@@ -12,6 +12,10 @@ class Bank:
         """Give amount to the player. False if amount <= 0 or the source cannot pay."""
         raise NotImplementedError
 
+    def display(self, uid: int) -> str:
+        """Balance for users: test mode has no real balance, so say so."""
+        return "unlimited (test mode)" if helpers.TEST_MODE else f"${self.balance(uid):,}"
+
 
 def _valid(amount) -> bool:
     return type(amount) is int and amount > 0

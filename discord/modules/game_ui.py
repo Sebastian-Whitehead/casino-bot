@@ -1,7 +1,11 @@
+import logging
+
 import aiohttp
 import nextcord
 from nextcord import ui, Interaction, ButtonStyle
 from modules.helpers import make_embed
+
+log = logging.getLogger(__name__)
 
 
 def format_chips(n: int) -> str:
@@ -15,7 +19,7 @@ async def _retry(label, func, **kw):
         try:
             return await func(**kw)
         except (aiohttp.ClientOSError, nextcord.HTTPException) as error:
-            print(f"[game_ui] {label} failed (attempt {attempt}): {error!r}")
+            log.warning("[game_ui] %s failed (attempt %d): %r", label, attempt, error)
     return None
 
 
@@ -25,6 +29,15 @@ async def safe_edit(message, **kw):
 
 async def safe_send(destination, **kw):
     return await _retry("send", destination.send, **kw)
+
+
+async def safe_delete(message):
+    """Delete a message if there is one; already-deleted or forbidden is fine."""
+    if message:
+        try:
+            await message.delete()
+        except Exception as error:
+            log.debug("[game_ui] delete failed: %r", error)
 
 
 def build_result_embed(title, won, net, wallet, extra=None):

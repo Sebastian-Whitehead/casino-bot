@@ -7,11 +7,15 @@ from nextcord import ui, Interaction, ButtonStyle
 from nextcord.ext import commands
 
 from modules.card import Card
-from modules.helpers import make_embed, payout, BLACKJACK_MULT, BLACKJACK_BJ_MULT, DEFAULT_BET
+from modules.helpers import GUILD_KW, make_embed, payout, BLACKJACK_MULT, BLACKJACK_BJ_MULT, DEFAULT_BET
 from modules.base_betting_view import BaseBettingView
 from modules.base_game_cog import BaseGameCog, Outcome
-from modules.game_ui import format_chips, safe_edit, safe_send
+import logging
 
+from modules.game_ui import format_chips, safe_delete, safe_edit, safe_send
+
+
+log = logging.getLogger(__name__)
 
 class BettingView(BaseBettingView):
     def __init__(self, cog, user, bet, thread):
@@ -46,7 +50,7 @@ class GameView(ui.View):
             if not interaction.response.is_done():
                 await interaction.response.defer()
         except Exception as e:
-            print(f"[Blackjack] Error deferring interaction: {e}")
+            log.warning("[Blackjack] Error deferring interaction: %s", e)
 
     @ui.button(label="Hit", style=ButtonStyle.success, custom_id="hit")
     async def hit(self, button, interaction: Interaction):
@@ -77,7 +81,7 @@ class Blackjack(BaseGameCog, commands.Cog):
         self.active_games = {}  # {thread_id: BettingView}
         self.default_bet = DEFAULT_BET
 
-    @nextcord.slash_command(description="Play a simple game of blackjack with chips.")
+    @nextcord.slash_command(description="Play a simple game of blackjack with chips.", **GUILD_KW)
     async def blackjack(self, interaction: nextcord.Interaction):
         await self.open_game(interaction, BettingView)
 
@@ -87,7 +91,7 @@ class Blackjack(BaseGameCog, commands.Cog):
             try:
                 self.economy.refund_wager(view.game_id, view.user.id)  # hand abandoned: refund the stake
             except Exception as e:
-                print(f"[Blackjack] Refund failed: {e}")
+                log.error("[Blackjack] Refund failed: %s", e)
 
     async def end_game_by_thread(self, thread_id):
         self.refund_open_round(self.active_games.get(thread_id))
@@ -171,11 +175,7 @@ class Blackjack(BaseGameCog, commands.Cog):
         game_view.stop()
         bv = game_view.betting_view
         bv.bet = game_view.bet  # the bet buttons may have moved it mid-hand
-        if game_view.game_message:
-            try:
-                await game_view.game_message.delete()
-            except Exception:
-                pass
+        await safe_delete(game_view.game_message)
         description = (f"Your hand: {self.calc_hand(game_view.player_hand)}\n"
                        f"Dealer's hand: {self.calc_hand(game_view.dealer_hand)}")
         try:
@@ -185,11 +185,7 @@ class Blackjack(BaseGameCog, commands.Cog):
             bv.in_round = False
 
     async def replace_game_message(self, game_view, title):
-        if game_view.game_message:
-            try:
-                await game_view.game_message.delete()
-            except Exception:
-                pass
+        await safe_delete(game_view.game_message)
         embed = make_embed(
             title=title,
             description=(f"Bet: {format_chips(game_view.bet)}\n"
@@ -253,7 +249,7 @@ class Blackjack(BaseGameCog, commands.Cog):
             except FileNotFoundError:
                 pass
             except OSError as e:
-                print(f"[Blackjack] Error deleting image file: {e}")
+                log.warning("[Blackjack] Error deleting image file: %s", e)
         return nextcord.File(data, filename=f"{user_id}.png")
 
     @staticmethod

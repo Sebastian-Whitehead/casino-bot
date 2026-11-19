@@ -13,7 +13,7 @@ class InsufficientFundsException(Exception):
         super().__init__()
 
     def __str__(self) -> str:
-        return f"${self.needs} more needed to play."
+        return f"{self.needs} more needed to play."
 
 
 os.chdir(Path(__file__).parent.parent)
@@ -29,6 +29,8 @@ TOKEN = os.environ.get('DISCORD_TOKEN') or config.get('token')
 
 TRACK_CASINO_BALANCE = config.get('track_casino_balance', True)
 TEST_GUILD_ID = config.get('test_guild_id')
+USE_TEST_GUILD = True  # True: slash commands register per-guild (instant); False: global
+GUILD_KW = {"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {}
 CASINO_CHANNEL_ID = config.get('casino_channel_id')
 THREAD_TIMEOUT_MINUTES = config_raw.get('thread_timeout_minutes', 60)
 THREAD_CLEANUP_CHECK_SECONDS = config_raw.get('thread_cleanup_check_seconds', 60)
@@ -51,6 +53,7 @@ RESTRICT_TO_CASINO_CHANNEL = config.get('restrict_to_casino_channel', True)
 CHALLENGE_FEE_ENABLED = config.get('challenge_fee_enabled', True)
 CHALLENGE_FEE_PERCENT = config.get('challenge_fee_percent', 5)
 CONFIRM_BETS = config.get('confirm_bets', True)
+SLOTS_WIN_RATE = config.get('slots_win_rate', 0.03)  # chance of the forced-win branch; tuned so slots RTP is about 0.95
 TEST_MODE = config.get('test_mode', False)  # infinite bank money; see config.yml.example
 
 
@@ -63,15 +66,11 @@ def make_embed(title=None, description=None, color=None, author=None,
                image=None, link=None, footer=None) -> Embed:
     """Wrapper for making discord embeds"""
     # Only set description if provided, to avoid <property object ...>
-    embed_kwargs = {}
+    embed_kwargs = {'color': color or Color.random()}
     if title:
         embed_kwargs['title'] = title
     if description:
         embed_kwargs['description'] = description
-    if color:
-        embed_kwargs['color'] = color
-    else:
-        embed_kwargs['color'] = Color.random()
     if link:
         embed_kwargs['url'] = link
     embed = Embed(**embed_kwargs)
@@ -79,10 +78,5 @@ def make_embed(title=None, description=None, color=None, author=None,
         embed.set_author(name=author)
     if image:
         embed.set_image(url=image)
-    # Only set footer if it's a valid string and not a property object
-    from nextcord import Embed as _Embed
-    if footer is not None and not isinstance(footer, property) and footer != _Embed.Empty:
-        embed.set_footer(text=str(footer))
-    else:
-        embed.set_footer(text=datetime.now().strftime("%m/%d/%Y %H:%M:%S"))
+    embed.set_footer(text=str(footer) if footer is not None else datetime.now().strftime("%m/%d/%Y %H:%M:%S"))
     return embed

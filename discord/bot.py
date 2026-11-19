@@ -44,8 +44,6 @@ async def on_thread_delete(thread: discord.Thread):
     parent_name = getattr(parent, 'name', None) if parent else None
     logger.info(f"Thread '{thread.name}' (ID: {thread.id}) deleted in channel: {parent_name}")
 
-USE_TEST_GUILD = True  # Set to True for fast test registration
-GUILD_KW = {"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {}
 
 @client.event
 async def on_ready() -> None:

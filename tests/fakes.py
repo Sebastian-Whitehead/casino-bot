@@ -10,20 +10,12 @@ class FakeEconomy:
     def get_chips(self, uid):
         return self.chips[uid]
 
-    def place_bet(self, uid, n):
-        assert n > 0 and self.chips[uid] >= n
-        self.chips[uid] -= n
-        self.chips["casino"] += n
-
-    def pay_out(self, uid, n):
-        self.chips["casino"] -= n
-        self.chips[uid] += n
-
     def open_wager(self, game_id, uid, game, amount):
         if self.chips[uid] < amount:
             raise InsufficientFundsException(self.chips[uid], amount)
         assert (game_id, uid) not in self.wagers, "duplicate wager"
-        self.place_bet(uid, amount)
+        self.chips[uid] -= amount
+        self.chips["casino"] += amount
         self.wagers[(game_id, uid)] = {"amount": amount, "status": "open"}
 
     def _close(self, game_id, uid, status, payout):
@@ -32,7 +24,8 @@ class FakeEconomy:
             return False
         w["status"] = status
         if payout:
-            self.pay_out(uid, payout)
+            self.chips["casino"] -= payout
+            self.chips[uid] += payout
         return True
 
     def settle_wager(self, game_id, uid, payout):

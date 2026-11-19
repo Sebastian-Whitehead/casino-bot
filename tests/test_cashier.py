@@ -37,7 +37,7 @@ class CashierTests(unittest.IsolatedAsyncioTestCase):
         self.eco = Economy()
         self.eco.bank.set_balance(UID, 0)
         self.eco.set_chips(UID, 0)
-        self.eco.cur.execute("DROP TABLE IF EXISTS bonus_claims")
+        self.eco.cur.execute("DELETE FROM bonus_claims")
         self.eco.bank.set_balance(self.eco.casino_user_id, 100000)
 
     async def test_custom_ids_unique(self):

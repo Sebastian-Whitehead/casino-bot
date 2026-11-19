@@ -1,6 +1,6 @@
 from nextcord import ui, Interaction, ButtonStyle
 from modules.helpers import make_embed
-from modules.game_ui import format_chips, safe_edit
+from modules.game_ui import format_chips, safe_delete, safe_edit
 
 class BaseBettingView(ui.View):
     min_bet = 1  # per-game override, used by cap_bet
@@ -48,6 +48,16 @@ class BaseBettingView(ui.View):
         self.bet = self.cap_bet(self.bet + 1)
         await self.update_bet_message(interaction)
 
+    @ui.button(label="All-in", style=ButtonStyle.secondary, row=0, custom_id="bet_max")
+    async def bet_max(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.get_balance())  # there is no table limit, so max and all-in are the same
+        await self.update_bet_message(interaction)
+
+    @ui.button(label="Half", style=ButtonStyle.secondary, row=1, custom_id="bet_half")
+    async def bet_half(self, button, interaction: Interaction):
+        self.bet = self.cap_bet(self.get_balance() // 2)
+        await self.update_bet_message(interaction)
+
     @ui.button(label="/10", style=ButtonStyle.secondary, row=1, custom_id="bet_div_10")
     async def bet_div_10(self, button, interaction: Interaction):
         self.bet = self.cap_bet(self.bet // 10)
@@ -65,8 +75,7 @@ class BaseBettingView(ui.View):
 
     @ui.button(emoji="❌", style=ButtonStyle.danger, row=2, custom_id="close")
     async def close(self, button, interaction: Interaction):
-        if self.game_message:
-            await self.game_message.delete()
+        await safe_delete(self.game_message)
         if self.bet_message:
             try:
                 await self.bet_message.edit(view=None)

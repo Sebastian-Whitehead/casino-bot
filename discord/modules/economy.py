@@ -3,6 +3,7 @@ import sqlite3
 import time
 from functools import wraps
 from typing import Tuple, List
+from modules import helpers
 from modules.bank import LocalBank
 from modules.helpers import CASINO_USER_ID, CHIP_VALUE, InsufficientFundsException
 
@@ -11,10 +12,6 @@ Entry = Tuple[int, int]  # (user_id, chips)
 
 
 class Economy:
-    def get_all_entries(self) -> List[Entry]:
-        """Return all entries in the economy table as a list of (user_id, chips)."""
-        self.cur.execute("SELECT * FROM economy")
-        return self.cur.fetchall()
     """A wrapper for the economy database (Singleton)"""
     _instance = None
     def __new__(cls, *args, **kwargs):
@@ -22,6 +19,19 @@ class Economy:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
+
+    def get_all_entries(self) -> List[Entry]:
+        """Return all entries in the economy table as a list of (user_id, chips)."""
+        self.cur.execute("SELECT * FROM economy")
+        return self.cur.fetchall()
+
+    def leaderboard(self, n: int = 10, game: str = None):
+        """Top n rows (rank, user_id, winnings, losses, net); overall, or for one game name."""
+        if game is None:
+            return self.cur.execute("SELECT rank, user_id, winnings, losses, net FROM leaderboards "
+                                    "ORDER BY rank, user_id LIMIT ?", (n,)).fetchall()
+        return self.cur.execute("SELECT rank, user_id, winnings, losses, net FROM game_leaderboards WHERE game=? "
+                                "ORDER BY rank, user_id LIMIT ?", (game, n)).fetchall()
 
     def _commit(func):
         @wraps(func)
@@ -120,18 +130,6 @@ class Economy:
             self.bank.withdraw(user_id, value)
             raise
 
-    def place_bet(self, user_id: int, n: int) -> None:
-        self._check(n)
-        have = self.get_chips(user_id)
-        if have < n:
-            raise InsufficientFundsException(have, n)
-        self._adjust_chips([(user_id, -n), (self.casino_user_id, n)])
-
-    def pay_out(self, user_id: int, n: int) -> None:
-        self._check(n)
-        self.get_entry(user_id)
-        self._adjust_chips([(self.casino_user_id, -n), (user_id, n)])
-
     # --- wagers: every bet is held under a game id until it is settled or refunded ---
 
     def open_wager(self, game_id: str, user_id: int, game: str, amount: int) -> None:
@@ -198,9 +196,10 @@ class Economy:
                 pairs += [(self.casino_user_id, -payouts[uid]), (uid, payouts[uid])]
             statements.append(("UPDATE wagers SET status='settled', payout=?, closed_at=? "
                                "WHERE game_id=? AND user_id=? AND status='open'", (payouts[uid], now, game_id, uid)))
-            statements.append(("INSERT INTO game_log(game_id, game, user_id, chips_wagered, chips_paid_out, "
-                               "result, winner, resolved_at) VALUES(?,?,?,?,?,?,?,?)",
-                               (game_id, game, uid, amount, payouts[uid], results[uid], winner, now)))
+            if not helpers.TEST_MODE:  # test games use fake bank money: not logged, so not on the leaderboards
+                statements.append(("INSERT INTO game_log(game_id, game, user_id, chips_wagered, chips_paid_out, "
+                                   "result, winner, resolved_at) VALUES(?,?,?,?,?,?,?,?)",
+                                   (game_id, game, uid, amount, payouts[uid], results[uid], winner, now)))
         self._adjust_chips(pairs, statements)
         return True
 
@@ -285,6 +284,24 @@ class Economy:
             resolved_at REAL NOT NULL,
             UNIQUE (game_id, user_id)
         )""")
+        self.cur.execute("CREATE TABLE IF NOT EXISTS bonus_claims (user_id INTEGER PRIMARY KEY, ts REAL NOT NULL)")
+        # derived from game_log, so it can never drift; recreated each start so edits here apply
+        self.cur.execute("DROP VIEW IF EXISTS game_leaderboards")
+        self.cur.execute("""CREATE VIEW game_leaderboards AS
+            SELECT game, user_id, games, winnings, losses, winnings - losses AS net,
+                   RANK() OVER (PARTITION BY game ORDER BY winnings - losses DESC) AS rank
+            FROM (SELECT game, user_id, COUNT(*) AS games,
+                         SUM(MAX(chips_paid_out - chips_wagered, 0)) AS winnings,
+                         SUM(MAX(chips_wagered - chips_paid_out, 0)) AS losses
+                  FROM game_log GROUP BY game, user_id)""")
+        self.cur.execute("DROP VIEW IF EXISTS leaderboards")
+        self.cur.execute("""CREATE VIEW leaderboards AS
+            SELECT user_id, games, winnings, losses, winnings - losses AS net,
+                   RANK() OVER (ORDER BY winnings - losses DESC) AS rank
+            FROM (SELECT user_id, COUNT(*) AS games,
+                         SUM(MAX(chips_paid_out - chips_wagered, 0)) AS winnings,
+                         SUM(MAX(chips_wagered - chips_paid_out, 0)) AS losses
+                  FROM game_log GROUP BY user_id)""")
 
     def close(self):
         """Safely closes the database"""
