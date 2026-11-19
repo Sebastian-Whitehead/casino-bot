@@ -1,11 +1,14 @@
+import math
 import nextcord as discord
 from nextcord import ui, ButtonStyle
 from modules.helpers import (
     CHALLENGE_FEE_ENABLED,
     CHALLENGE_FEE_PERCENT,
+    InsufficientFundsException,
     make_embed,
 )
-from modules.base_game_cog import BettingGameCog
+from modules.base_game_cog import BaseGameCog
+from modules.game_ui import format_chips, safe_send
 
 
 class ChallengeView(ui.View):
@@ -59,28 +62,25 @@ class ChallengeView(ui.View):
         )
 
 
-class ChallengeGameCog(BettingGameCog):
+class ChallengeGameCog(BaseGameCog):
+    challenge_min_bet = 1  # per-game override
+
     async def open_challenge(self, interaction, opponent, bet, game_name):
+        async def reject(message):
+            await interaction.response.send_message(message, ephemeral=True)
+            return None
+
         if opponent.id == interaction.user.id:
-            await interaction.response.send_message(
-                "You cannot challenge yourself.", ephemeral=True
-            )
-            return None
+            return await reject("You cannot challenge yourself.")
         if opponent.bot:
-            await interaction.response.send_message(
-                "You cannot challenge a bot.", ephemeral=True
-            )
-            return None
-        if bet <= 0:
-            await interaction.response.send_message(
-                "The bet must be greater than $0.", ephemeral=True
-            )
-            return None
-        if self.economy.get_entry(interaction.user.id)[1] < bet:
-            await interaction.response.send_message(
-                f"You need ${bet} to create this challenge.", ephemeral=True
-            )
-            return None
+            return await reject("You cannot challenge a bot.")
+        if type(bet) is not int or bet < self.challenge_min_bet:
+            return await reject(
+                f"The bet must be at least {format_chips(self.challenge_min_bet)}.")
+        if self.economy.get_chips(interaction.user.id) < bet:
+            return await reject(
+                f"You need {format_chips(bet)} to create this challenge. "
+                "Use /cashier or /buy to get more.")
 
         await interaction.response.send_message(
             f"{game_name} challenge created!", ephemeral=True
@@ -99,30 +99,31 @@ class ChallengeGameCog(BettingGameCog):
             title=f"{game_name} Challenge",
             description=(
                 f"{interaction.user.mention} challenged {opponent.mention}.\n"
-                f"Each player bets **${bet}**.\n"
+                f"Each player bets **{format_chips(bet)}**.\n"
                 "The challenged player must accept or decline."
             )
         )
-        challenge.challenge_message = await thread.send(embed=embed, view=challenge)
+        challenge.challenge_message = await safe_send(thread, embed=embed, view=challenge)
         return challenge
 
     async def accept_challenge(self, challenge, interaction):
         if challenge.resolved:
             return
-        challenger_balance = self.economy.get_entry(challenge.challenger.id)[1]
-        opponent_balance = self.economy.get_entry(challenge.opponent.id)[1]
-        if min(challenger_balance, opponent_balance) < challenge.bet:
-            challenge.resolved = True
+        challenge.resolved = True
+        staked = []
+        try:
+            for player in (challenge.challenger, challenge.opponent):
+                self.economy.place_bet(player.id, challenge.bet)
+                staked.append(player)
+        except InsufficientFundsException:
+            for player in staked:  # undo the first stake
+                self.economy.pay_out(player.id, challenge.bet)
             await interaction.response.edit_message(
-                content="Challenge cancelled because a player no longer has enough money.",
+                content="Challenge cancelled because a player no longer has enough chips.",
                 embed=None,
                 view=None
             )
             return
-
-        challenge.resolved = True
-        self.economy.add_money(challenge.challenger.id, -challenge.bet)
-        self.economy.add_money(challenge.opponent.id, -challenge.bet)
         await interaction.response.edit_message(
             content="Challenge accepted. Rolling now...",
             embed=None,
@@ -131,16 +132,18 @@ class ChallengeGameCog(BettingGameCog):
         await self.resolve_challenge(challenge)
 
     def settle_challenge(self, winner_id, bet):
+        """Pay the winner the pot minus a floored fee; the fee stays with the casino."""
         pot = bet * 2
         fee = (
-            int(pot * CHALLENGE_FEE_PERCENT / 100)
+            math.floor(pot * CHALLENGE_FEE_PERCENT / 100)
             if CHALLENGE_FEE_ENABLED
             else 0
         )
         payout = pot - fee
-        self.economy.add_money(winner_id, payout)
+        if payout > 0:
+            self.economy.pay_out(winner_id, payout)
         return payout, fee
 
     def refund_challenge(self, challenge):
-        self.economy.add_money(challenge.challenger.id, challenge.bet)
-        self.economy.add_money(challenge.opponent.id, challenge.bet)
+        self.economy.pay_out(challenge.challenger.id, challenge.bet)
+        self.economy.pay_out(challenge.opponent.id, challenge.bet)

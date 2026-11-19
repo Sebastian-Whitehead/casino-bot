@@ -1,19 +1,30 @@
-import nextcord
+import time
+
 import nextcord as discord
 from nextcord.ext import commands
 from modules.economy import Economy
-from modules.helpers import *
+from modules.helpers import B_COOLDOWN, B_MULT, CHIP_VALUE, DEFAULT_BET, make_embed
+
+
+def claim_bonus(economy, user_id: int, now: float = None):
+    """Grant the bonus unless on cooldown. Returns (granted, seconds_remaining, amount)."""
+    now = time.time() if now is None else now
+    amount = DEFAULT_BET * B_MULT * CHIP_VALUE
+    economy.cur.execute("CREATE TABLE IF NOT EXISTS bonus_claims (user_id INTEGER PRIMARY KEY, ts REAL NOT NULL)")
+    row = economy.cur.execute("SELECT ts FROM bonus_claims WHERE user_id=?", (user_id,)).fetchone()
+    if row and now - row[0] < B_COOLDOWN * 3600:
+        return False, int(B_COOLDOWN * 3600 - (now - row[0])), amount
+    if not economy.bank.deposit(user_id, amount):  # casino cannot pay: no claim recorded
+        return False, 0, amount
+    economy.cur.execute("INSERT OR REPLACE INTO bonus_claims(user_id, ts) VALUES(?,?)", (user_id, now))
+    economy.conn.commit()
+    return True, 0, amount
 
 
 class GamblingHelpers(commands.Cog, name='General'):
     def __init__(self, client: commands.Bot) -> None:
         self.client = client
-        from modules.economy import Economy
-        from modules.helpers import DEFAULT_BET, B_MULT, B_COOLDOWN
         self.economy = Economy()
-        self.default_bet = DEFAULT_BET
-        self.bonus_multiplier = B_MULT
-        self.bonus_cooldown = B_COOLDOWN
 
     @commands.command(hidden=True)
     @commands.is_owner()
@@ -21,59 +32,44 @@ class GamblingHelpers(commands.Cog, name='General'):
         self,
         ctx: commands.Context,
         user_id: int=None,
-        money: int=0,
-        credits: int=0
+        money: int=None,
+        chips: int=None
     ):
-        if money:
+        if user_id is None:
+            return
+        if money is not None:
             self.economy.set_money(user_id, money)
-        if credits:
-            self.economy.set_credits(user_id, credits)
+        if chips is not None:
+            self.economy.set_credits(user_id, chips)  # chips live in the credits column
 
     @commands.command(
         brief="Gives you your bonus once every set cooldown hours.",
         usage="add"
     )
-    @commands.cooldown(1, 1, type=commands.BucketType.user)  # Cooldown set dynamically
     async def add(self, ctx: commands.Context):
-        amount = self.default_bet * self.bonus_multiplier
-        self.economy.add_money(ctx.author.id, amount)
-        await ctx.send(f"Added ${amount} come back in {self.bonus_cooldown}hrs")
-
-    from modules.helpers import TEST_GUILD_ID
-    @nextcord.slash_command(
-        name="balance",
-        description="Show your cash and slot credits. Optionally check another user's balance.",
-        guild_ids=[TEST_GUILD_ID]
-    )
-    async def balance(self, interaction: nextcord.Interaction, user: nextcord.Member = None):
-        from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
-        if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
-            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
-            return
-        user = user or interaction.user
-        profile = self.economy.get_entry(user.id)
-        embed = make_embed(
-            title=f"{user.display_name}'s Balance",
-            description=(
-                f'**${profile[1]:,}** cash' +
-                f'\n**{profile[2]:,}** credits'
-            )
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
-        await interaction.response.send_message(embed=embed, ephemeral=(user == interaction.user))
+        granted, remaining, amount = claim_bonus(self.economy, ctx.author.id)
+        if granted:
+            await ctx.send(f"Added ${amount:,} to your bank. Come back in {B_COOLDOWN}hrs.")
+        elif remaining:
+            h, m = divmod(remaining // 60, 60)
+            await ctx.send(f"Bonus on cooldown: {h}h {m}m left.")
+        else:
+            await ctx.send("The casino cannot pay the bonus right now.")
 
     @commands.command(
-        brief="Shows the user with the most money",
+        brief="Shows the players with the most chips plus bank money",
         usage="leaderboard",
         aliases=["top"]
     )
     async def leaderboard(self, ctx):
-        entries = self.economy.top_entries(5)
-        embed = make_embed(title='Leaderboard:', color=discord.Color.gold())
-        for i, entry in enumerate(entries):
+        entries = [e for e in self.economy.get_all_entries() if e[0] != self.economy.casino_user_id]
+        entries = sorted(entries, key=lambda e: e[1] + e[2] * CHIP_VALUE, reverse=True)[:5]
+        embed = make_embed(title='Leaderboard (chips + bank money):', color=discord.Color.gold())
+        for i, (uid, money, chips) in enumerate(entries):
+            user = self.client.get_user(uid)
             embed.add_field(
-                name=f"{i+1}. {self.client.get_user(entry[0]).name}",
-                value='${:,}'.format(entry[1]),
+                name=f"{i+1}. {user.name if user else uid}",
+                value=f"{chips:,} chips + ${money:,}",
                 inline=False
             )
         await ctx.send(embed=embed)

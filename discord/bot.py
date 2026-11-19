@@ -44,8 +44,8 @@ async def on_thread_delete(thread: discord.Thread):
     parent_name = getattr(parent, 'name', None) if parent else None
     logger.info(f"Thread '{thread.name}' (ID: {thread.id}) deleted in channel: {parent_name}")
 
-from modules.helpers import TEST_GUILD_ID
 USE_TEST_GUILD = True  # Set to True for fast test registration
+GUILD_KW = {"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {}
 
 @client.event
 async def on_ready() -> None:
@@ -68,14 +68,14 @@ async def handle_cleanup_command(interaction: discord.Interaction) -> None:
         return
     try:
         await interaction.response.defer(ephemeral=True)
-        await run_thread_cleanup(client)
-        await interaction.followup.send("Thread cleanup triggered.", ephemeral=True)
+        deleted = await run_thread_cleanup(client)
+        await interaction.followup.send(f"Thread cleanup done: deleted {deleted} thread(s).", ephemeral=True)
     except Exception as e:
         logger.error(f"[Cleanup Command] Error: {e}")
 
 @client.slash_command(
     description="Manually trigger thread cleanup (owner only)",
-    **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+    **GUILD_KW
 )
 async def cleanup_threads(interaction: discord.Interaction) -> None:
     """Slash command to manually trigger thread cleanup (owner only)."""
@@ -90,11 +90,10 @@ from modules.economy import Economy
 
 @client.slash_command(
     description="Show the casino's current balance (owner only)",
-    **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+    **GUILD_KW
 )
 async def casino_balance(interaction: discord.Interaction) -> None:
     """Slash command to show the casino's current balance (owner only)."""
-    from modules.helpers import TRACK_CASINO_BALANCE
     if not _is_owner(interaction):
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
@@ -109,11 +108,10 @@ async def casino_balance(interaction: discord.Interaction) -> None:
 # --- Add money to casino (owner only) ---
 @client.slash_command(
     description="Add money to the casino's balance (owner only)",
-    **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
+    **GUILD_KW
 )
 async def add_casino_money(interaction: discord.Interaction, amount: int) -> None:
     """Slash command to add money to the casino's balance (owner only)."""
-    from modules.helpers import TRACK_CASINO_BALANCE
     if not _is_owner(interaction):
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return

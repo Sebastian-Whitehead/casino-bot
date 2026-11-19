@@ -1,3 +1,4 @@
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -40,14 +41,20 @@ B_MULT = config.get('bonus_multiplier', 5)
 DICE_MULT = config.get('dice_multiplier', 5)
 PREFIX = config.get('prefix', '$')
 OWNER_IDS = config.get('owner_ids')
-DEFAULT_BET = config.get('default_bet', 100)
-SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)
-TOKEN_PRICE = config.get('token_price', 10)
+DEFAULT_BET = config.get('default_bet', 1)  # chips
+SLOTS_DEFAULT_BET = config.get('slots_default_bet', 1)  # chips
+CHIP_VALUE = config.get('chip_value', 10)  # bank money per chip
+COINFLIP_MIN_BET = config.get('coinflip_min_bet', 2)  # chips
 B_COOLDOWN = config.get('bonus_cooldown', 12)
 CASINO_USER_ID = config.get('casino_user_id', 0)
 RESTRICT_TO_CASINO_CHANNEL = config.get('restrict_to_casino_channel', True)
 CHALLENGE_FEE_ENABLED = config.get('challenge_fee_enabled', True)
 CHALLENGE_FEE_PERCENT = config.get('challenge_fee_percent', 5)
+
+
+def payout(bet: int, mult) -> int:
+    """Total chips returned (stake included) for a winning bet."""
+    return int(math.floor(bet * mult))
 
 
 def make_embed(title=None, description=None, color=None, author=None,

@@ -22,6 +22,11 @@ class Handlers(commands.Cog, name='handlers'):
     async def on_command_error(self, ctx: commands.Context, error):
         import traceback
         import sys
+        if isinstance(error, CommandNotFound):
+            # No help command is registered (help_command=None), so just point to slash commands.
+            if ctx.message.content.startswith(PREFIX) and len(ctx.message.content) > len(PREFIX):
+                await ctx.send("Unknown command. Use the slash commands, try `/help`.")
+            return
         print("Exception in on_command_error:")
         traceback.print_exception(type(error), error, error.__traceback__, file=sys.stdout)
 
@@ -31,9 +36,6 @@ class Handlers(commands.Cog, name='handlers'):
         if isinstance(error, CommandInvokeError):
             await self.on_command_error(ctx, error.original)
         
-        elif isinstance(error, CommandNotFound):
-            await ctx.invoke(self.client.get_command('help'))
-
         elif isinstance(error, (MissingRequiredArgument,
                                 TooManyArguments, BadArgument)):
             await ctx.invoke(self.client.get_command('help'), ctx.command.name)

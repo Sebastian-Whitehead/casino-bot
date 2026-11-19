@@ -1,215 +1,109 @@
+import asyncio
 import bisect
+import io
+import os
 import random
+
 import nextcord as discord
-from nextcord.ext import commands
 from nextcord import ui, Interaction, ButtonStyle
-from modules.helpers import *
-from modules.base_betting_view import BaseBettingView
-from modules.base_game_cog import BettingGameCog
+from nextcord.ext import commands
 from PIL import Image
+
+from modules.base_betting_view import BaseBettingView
+from modules.base_game_cog import BaseGameCog, Outcome
+from modules.game_ui import GameResultView, format_chips, safe_edit, safe_send
+from modules.helpers import SLOTS_DEFAULT_BET, SLOTS_MULTS, TEST_GUILD_ID, payout
+
+USE_TEST_GUILD = False  # Set to True for fast test registration
+AUTO_SPIN_DELAY = 5
+
+
+class _AutoInteraction:
+    """Stand-in for auto-spins: no interaction is alive, so nothing may be sent through it."""
+
+    class response:
+        @staticmethod
+        def is_done():
+            return True
 
 
 class BettingView(BaseBettingView):
-    balance_index = 2
-    bet_title = "Set your bet (credits)"
-    currency_name = "credits"
-
     def __init__(self, cog, user, bet, thread):
         super().__init__(cog, user, bet, thread)
         self.auto_spin = False
         self.auto_task = None
-        import asyncio
         self._auto_stop_event = asyncio.Event()
 
-    @ui.button(label="Auto", style=ButtonStyle.secondary, row=2, custom_id="auto_spin")
+    @ui.button(label="Auto", style=ButtonStyle.secondary, row=2, custom_id="slots_auto_spin")
     async def auto_spin_btn(self, button, interaction: Interaction):
-        import asyncio
-        if not self.auto_spin:
-            self.auto_spin = True
-            button.style = ButtonStyle.primary  # Blue when on
-            self._auto_stop_event.clear()
-            self.auto_task = self.cog.client.loop.create_task(self.auto_spin_loop(interaction))
-            await interaction.response.edit_message(view=self)
-            await interaction.followup.send("Auto-spin started!", ephemeral=True)
+        if self.auto_spin:
+            self.stop_auto()
         else:
-            self.auto_spin = False
-            button.style = ButtonStyle.secondary  # Black when off
-            self._auto_stop_event.set()
-            if self.auto_task:
-                try:
-                    self.auto_task.cancel()
-                    await asyncio.sleep(0)
-                except Exception:
-                    pass
-                self.auto_task = None
-            await interaction.response.edit_message(view=self)
-            await interaction.followup.send("Auto-spin stopped.", ephemeral=True)
+            self.auto_spin = True
+            button.style = ButtonStyle.primary
+            self._auto_stop_event.clear()
+            self.auto_task = asyncio.create_task(self.auto_spin_loop())
+        await interaction.response.edit_message(view=self)
 
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="slots_start")
     async def start_spin(self, button, interaction: Interaction):
-        await self.cog.start_game(self, interaction)
+        await self.cog.start_round(self, interaction)
 
-    async def auto_spin_loop(self, interaction):
-        import asyncio
+    def stop_auto(self):
+        # Never cancel the task: it may be between placing the bet and paying out.
+        self.auto_spin = False
+        self._auto_stop_event.set()
+        self.auto_spin_btn.style = ButtonStyle.secondary
+
+    def _game_alive(self):
+        return self.cog.active_games.get(self.thread.id) is self
+
+    async def auto_spin_loop(self):
         try:
-            while self.auto_spin:
+            spun = False
+            while self.auto_spin and self._game_alive():
                 try:
-                    await asyncio.wait_for(self._auto_stop_event.wait(), timeout=5)
+                    await asyncio.wait_for(self._auto_stop_event.wait(), timeout=AUTO_SPIN_DELAY)
                     break
                 except asyncio.TimeoutError:
                     pass
-                if not self.auto_spin:
+                # Back to Bet clears game_message: that is the stop signal after a spin
+                if not (self.auto_spin and self._game_alive()) or (spun and self.game_message is None):
                     break
-                await self.cog.start_game(self, interaction)
-        except asyncio.CancelledError:
-            pass
-
-class GameView(ui.View):
-    def __init__(self, cog, user, bet, thread, betting_view):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.user = user
-        self.bet = bet
-        self.thread = thread
-        self.betting_view = betting_view
-        self.game_message = None
-
-    async def interaction_check(self, interaction: Interaction) -> bool:
-        return interaction.user.id == self.user.id
-
-    @ui.button(label="Play Again", style=ButtonStyle.success, custom_id="play_again")
-    async def play_again(self, button, interaction: Interaction):
-        self.auto_spin = False
-        await self.cog.start_game(self.betting_view, interaction)
+                if self.get_balance() < self.bet:
+                    await safe_send(self.thread, content=f"Auto-spin stopped: you need {format_chips(self.bet)} to spin "
+                                                         f"(you have {format_chips(self.get_balance())}).")
+                    break
+                await self.cog.start_round(self, _AutoInteraction())
+                spun = True
+        except Exception as e:
+            print(f"[Slots] Auto-spin error: {e!r}")
+        finally:
+            self.stop_auto()
+            self.auto_task = None
+            if self._game_alive():
+                await self.refresh_bet_message()
 
 
-    @ui.button(label="Back to Bet", style=ButtonStyle.secondary, custom_id="back_to_bet")
-    async def back_to_bet(self, button, interaction: Interaction):
-        # If auto-spin is running, stop it and wait for the task to finish
-        bv = self.betting_view
-        stopped = False
-        if bv.auto_spin:
-            bv.auto_spin = False
-            stopped = True
-            bv._auto_stop_event.set()
-            if bv.auto_task:
-                try:
-                    bv.auto_task.cancel()
-                    import asyncio
-                    await asyncio.sleep(0)  # Let the cancellation propagate
-                except Exception:
-                    pass
-                bv.auto_task = None
-        if self.game_message:
-            await self.game_message.delete()
-        if stopped:
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("Auto-spin stopped.", ephemeral=True)
-            except Exception as e:
-                print(f"[Slots] Error sending auto-spin stopped: {e}")
-        else:
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
-            except Exception as e:
-                print(f"[Slots] Error deferring interaction: {e}")
+class Slots(BaseGameCog, commands.Cog):
+    game_name = "Slots"
 
-
-class Slots(BettingGameCog, commands.Cog):
     def __init__(self, client: commands.Bot):
         self.client = client
         from modules.economy import Economy
-        from modules.helpers import SLOTS_DEFAULT_BET, TOKEN_PRICE, DEFAULT_BET
         self.economy = Economy()
         self.active_games = {}  # {thread_id: BettingView}
-        self.slots_default_bet = SLOTS_DEFAULT_BET
-        self.token_price = TOKEN_PRICE
-        self.default_bet = DEFAULT_BET
-
-    from modules.helpers import TEST_GUILD_ID
-    USE_TEST_GUILD = False  # Set to True for fast test registration
+        self.default_bet = SLOTS_DEFAULT_BET
 
     @discord.slash_command(
-        description="Play the slot machine. Bet must be 1-3 credits.",
+        description="Play the slot machine. Three matching symbols win.",
         **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
     )
     async def slots(self, interaction: discord.Interaction):
-        from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
-        if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
-            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
-            return
-        if interaction.response.is_done():
-            print("[Slots] Interaction already responded to, aborting.")
-            return
-        try:
-            await interaction.response.send_message("Game started! \u2705", ephemeral=True)
-        except Exception as e:
-            print(f"[Slots] Error sending game started: {e}")
-            return
-        thread = await interaction.channel.create_thread(
-            name=f"Slots - {interaction.user.display_name}",
-            type=discord.ChannelType.public_thread
-        )
-        balance = self.economy.get_entry(interaction.user.id)[2]
-        # Cap bet to user's balance (minimum 1 if balance is 0)
-        bet = min(self.slots_default_bet, balance) if balance > 0 else 1
-        view = BettingView(self, interaction.user, bet, thread)
-        self.active_games[thread.id] = view
-        # Send a static instructions embed (buy/sell credits) as the FIRST message
-        instructions_embed = make_embed(
-            title="How to Buy/Sell Credits",
-            description=(
-                f"Each credit costs ${self.token_price}.\n"
-                f"To buy credits: `/buyc amount_to_buy:<number>`\n"
-                f"To sell credits: `/sellc amount_to_sell:<number>`"
-            )
-        )
-        await thread.send(embed=instructions_embed)
-        # Now send the betting window embed, WITHOUT buy/sell instructions
-        embed = view.bet_embed()
-        msg = await thread.send(embed=embed, view=view)
-        view.bet_message = msg
-    async def end_game_by_thread(self, thread_id):
-        # End/cleanup the game in this thread if it exists
-        view = self.active_games.pop(thread_id, None)
-        if view:
-            # Clean up messages/UI if needed
-            try:
-                if view.game_message:
-                    await view.game_message.delete()
-            except Exception:
-                pass
-            try:
-                if view.bet_message:
-                    await view.bet_message.edit(view=None)
-            except Exception:
-                pass
-            # Optionally, send a message to the thread (if not deleted yet)
-            try:
-                await view.thread.send("Game ended due to inactivity.")
-            except Exception:
-                pass
-            # Archive and lock the thread (if not already)
-            try:
-                await view.thread.edit(archived=True, locked=True)
-            except Exception:
-                pass
+        await self.open_game(interaction, BettingView)
 
-    async def start_game(self, betting_view: BettingView, interaction: Interaction):
-        ready = await self.prepare_bet_round(
-            betting_view,
-            interaction,
-            "You do not have enough credits to place this bet! (You have {balance}, bet is {bet})"
-        )
-        if not ready:
-            return
-        # Play slot game
-        msg = await self.send_game_message(betting_view, betting_view.bet)
-        betting_view.game_message = msg
-
-    async def send_game_message(self, betting_view, bet):
-        # Slot logic and image generation
+    async def play(self, betting_view, interaction, **choice) -> Outcome:
+        bet = betting_view.bet
         path = os.path.join(os.path.dirname(__file__), '..', 'modules')
         facade = Image.open(f'{path}/slot-face.png').convert('RGBA')
         reel = Image.open(f'{path}/slot-reel.png').convert('RGBA')
@@ -240,77 +134,17 @@ class Slots(BettingGameCog, commands.Cog):
             bg.alpha_composite(facade)
             images.append(bg)
         fp = f'{betting_view.user.id}_slots.gif'
-        images[0].save(
-            fp,
-            save_all=True,
-            append_images=images[1:],
-            duration=50
-        )
-        # win logic
-        result = ('lost', bet)
+        buf = io.BytesIO()  # in memory: no temp file to leak
+        images[0].save(buf, format='GIF', save_all=True, append_images=images[1:], duration=50)
+        buf.seek(0)
+        file = discord.File(buf, filename=fp)
         # (1+s1)%6 gets the symbol 0-5 inclusive
-        from modules.helpers import SLOTS_MULTS
-        if (1+s1)%6 == (1+s2)%6 == (1+s3)%6:
-            symbol = (1+s1)%6
-            reward = SLOTS_MULTS[symbol] * bet
-            result = ('won', reward)
-            self.economy.add_credits(betting_view.user.id, reward)
-        # --- Game result logging ---
-        print(f"[Slots] User: {betting_view.user} (ID: {betting_view.user.id}), Bet: {bet}, Result: {result[0]}, Amount: {result[1]}, Symbols: {((1+s1)%6, (1+s2)%6, (1+s3)%6)}")
-        embed = make_embed(
-            title=(
-                f'You {result[0]} {result[1]} credits'+
-                ('.' if result[0] == 'lost' else '!')
-            ),
-            description=(
-                'You now have ' +
-                f'**{self.economy.get_entry(betting_view.user.id)[2]}** ' +
-                'credits.'
-            ),
-            color=(
-                discord.Color.red() if result[0] == "lost"
-                else discord.Color.green()
-            )
-        )
-        file = discord.File(fp, filename=fp)
-        embed.set_image(url=f"attachment://{fp}")
-        view = GameView(self, betting_view.user, bet, betting_view.thread, betting_view)
-        msg = await betting_view.thread.send(file=file, embed=embed, view=view)
-        view.game_message = msg
-        balance = self.economy.get_entry(betting_view.user.id)[2]
-        bet_embed = make_embed(
-            title="Set your bet (credits)",
-            description=f"Current bet: {betting_view.bet} credits\nWallet: {balance} credits"
-        )
-        if betting_view.bet_message:
-            await betting_view.bet_message.edit(embed=bet_embed, view=betting_view)
-        os.remove(fp)
-        return msg
+        symbols = ((1+s1)%6, (1+s2)%6, (1+s3)%6)
+        if symbols[0] == symbols[1] == symbols[2]:
+            return Outcome(True, payout(bet, SLOTS_MULTS[symbols[0]]), "Slots: three of a kind!",
+                           file=file)
+        return Outcome(False, 0, "Slots: no match", file=file)
 
-    @discord.slash_command(
-        description=lambda self: f"Purchase credits. Each credit is worth ${self.token_price}.",
-        **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
-    )
-    async def buyc(self, interaction: discord.Interaction, amount_to_buy: int):
-        user_id = interaction.user.id
-        profile = self.economy.get_entry(user_id)
-        cost = amount_to_buy * self.token_price
-        if profile[1] >= cost:
-            self.economy.add_money(user_id, cost*-1)
-            self.economy.add_credits(user_id, amount_to_buy)
-        await interaction.response.send_message(f"Purchased {amount_to_buy} credits.", ephemeral=True)
-
-    @discord.slash_command(
-        description=lambda self: f'Sell credits. Each credit is worth ${self.token_price}.' ,
-        **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
-    )
-    async def sellc(self, interaction: discord.Interaction, amount_to_sell: int):
-        user_id = interaction.user.id
-        profile = self.economy.get_entry(user_id)
-        if profile[2] >= amount_to_sell:
-            self.economy.add_credits(user_id, amount_to_sell*-1)
-            self.economy.add_money(user_id, amount_to_sell*self.token_price)
-        await interaction.response.send_message(f"Sold {amount_to_sell} credits.", ephemeral=True)
 
 def setup(client: commands.Bot):
     client.add_cog(Slots(client))

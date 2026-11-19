@@ -11,13 +11,16 @@ bot:
   casino_user_id: 1406929502470410291 # User ID used for the casino's bank/balance (should match the bot's user ID)
 
   # --- Economy/Betting Defaults ---
-  default_bet: 10  # Default bet for blackjack and monetary games
-  slots_default_bet: 1  # Default bet for slots (in credits)
-  token_price: 10  # Price of one slot credit in $ (monetary value)
+  default_bet: 1  # Default bet, in chips
+  slots_default_bet: 1  # Default slots bet, in chips
+  chip_value: 10  # Bank money per chip (buying 3 chips costs 3 * chip_value)
+  coinflip_min_bet: 2  # Minimum coinflip bet in chips (1 chip at 1.5x would return only the stake)
   bonus_cooldown: 12 # Bonus every x hours
   track_casino_balance: true # Toggle for tracking casino balance (set false to disable casino bank logic)
 
   # --- Multipliers/Payouts ---
+  # A multiplier is the TOTAL return including the stake: the bet is deducted first, then
+  # floor(bet * multiplier) chips are paid on a win. Net profit = bet * (multiplier - 1).
   bonus_multiplier: 5 # bonus = default_bet * multiplier
   dice_multiplier: 5 # payout multiplier for dice guessing game
   coinflip_multiplier: 1.5 # payout multiplier for coinflip (default 2)

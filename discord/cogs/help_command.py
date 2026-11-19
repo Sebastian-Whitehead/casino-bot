@@ -26,7 +26,7 @@ class Help(commands.Cog, name='help'):
         )
         embed.add_field(
             name="/slots",
-            value="Play the slot machine. Set your bet in credits, then spin for a chance at big multipliers!",
+            value="Play the slot machine. Set your bet in chips, then spin for a chance at big multipliers!",
             inline=False
         )
         embed.add_field(
@@ -41,20 +41,25 @@ class Help(commands.Cog, name='help'):
         )
         embed.add_field(
             name="/balance [user]",
-            value="Show your cash and slot credits. Optionally check another user's balance.",
+            value="Show your bank money and chips. Optionally check another user's balance.",
             inline=False
         )
         embed.add_field(
-            name="/buyc amount_to_buy",
-            value="Buy slot credits with your cash balance.",
+            name="/cashier",
+            value="Open the chip cashier to buy chips with bank money or cash chips back out.",
             inline=False
         )
         embed.add_field(
-            name="/sellc amount_to_sell",
-            value="Sell slot credits for cash.",
+            name="/buy amount",
+            value="Buy that many chips with your bank money.",
             inline=False
         )
-        embed.set_footer(text="All games use slash commands. Use the betting window to set your wager before starting each game.")
+        embed.add_field(
+            name="/cashout amount",
+            value="Cash chips out to bank money. Use a number or `all`.",
+            inline=False
+        )
+        embed.set_footer(text="All games are played with chips. Use the betting window to set your wager before starting each game.")
         fp = os.path.join(ABS_PATH, 'modules/cards/aces.png')
         file = discord.File(fp, filename='aces.png')
         embed.set_thumbnail(url=f"attachment://aces.png")

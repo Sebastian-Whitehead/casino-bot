@@ -2,7 +2,8 @@ import random
 import sqlite3
 from functools import wraps
 from typing import Tuple, List
-from modules.helpers import CASINO_USER_ID
+from modules.bank import LocalBank
+from modules.helpers import CASINO_USER_ID, CHIP_VALUE, InsufficientFundsException
 
 
 Entry = Tuple[int, int, int]
@@ -36,8 +37,86 @@ class Economy:
             return
         self.casino_user_id = CASINO_USER_ID
         self.open()
+        self.bank = LocalBank(self)
+        self._migrate_cash_wipe()
         self._ensure_casino_entry()
         self._initialized = True
+
+    def _migrate_cash_wipe(self):
+        """One-time (PRAGMA user_version 0 -> 1): back up the db, zero all money, reset casino money."""
+        if self.cur.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            return
+        if self.cur.execute("SELECT COUNT(*) FROM economy").fetchone()[0]:
+            if self.db_path != ':memory:':
+                dest = sqlite3.connect(self.db_path + '.pre-chips.bak')
+                with dest:
+                    self.conn.backup(dest)
+                dest.close()
+            self.cur.execute("UPDATE economy SET money=0")
+            self.cur.execute("INSERT OR IGNORE INTO economy(user_id, money, credits) VALUES(?,0,0)",
+                             (self.casino_user_id,))
+            self.cur.execute("UPDATE economy SET money=? WHERE user_id=?",
+                             (CASINO_START_BALANCE, self.casino_user_id))
+        self.cur.execute("PRAGMA user_version=1")
+        self.conn.commit()
+
+    @staticmethod
+    def _check(amount):
+        if type(amount) is not int or amount <= 0:
+            raise ValueError(f"amount must be a positive int, got {amount!r}")
+
+    def get_chips(self, user_id: int) -> int:
+        return self.get_entry(user_id)[2]
+
+    def _adjust_chips(self, pairs):
+        """Apply [(uid, delta)] in one transaction."""
+        try:
+            for uid, delta in pairs:
+                self.cur.execute("UPDATE economy SET credits=credits+? WHERE user_id=?", (delta, uid))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def buy_chips(self, user_id: int, n: int) -> bool:
+        if type(n) is not int or n <= 0:
+            return False
+        price = n * CHIP_VALUE
+        if not self.bank.withdraw(user_id, price):
+            return False
+        try:
+            self._adjust_chips([(user_id, n)])
+        except Exception:
+            self.bank.deposit(user_id, price)
+            raise
+        return True
+
+    def cash_out(self, user_id: int, n: int) -> None:
+        self._check(n)
+        have = self.get_chips(user_id)
+        if have < n:
+            raise InsufficientFundsException(have, n)
+        value = n * CHIP_VALUE
+        # casino bank cannot pay: reported as a shortfall of the bank money, chips untouched
+        if not self.bank.deposit(user_id, value):
+            raise InsufficientFundsException(self.bank.balance(self.casino_user_id), value)
+        try:
+            self._adjust_chips([(user_id, -n)])
+        except Exception:
+            self.bank.withdraw(user_id, value)
+            raise
+
+    def place_bet(self, user_id: int, n: int) -> None:
+        self._check(n)
+        have = self.get_chips(user_id)
+        if have < n:
+            raise InsufficientFundsException(have, n)
+        self._adjust_chips([(user_id, -n), (self.casino_user_id, n)])
+
+    def pay_out(self, user_id: int, n: int) -> None:
+        self._check(n)
+        self.get_entry(user_id)
+        self._adjust_chips([(self.casino_user_id, -n), (user_id, n)])
 
     def _ensure_casino_entry(self):
         self.cur.execute(
@@ -81,6 +160,7 @@ class Economy:
         """Initializes the database"""
         import os
         db_path = os.environ.get('ECONOMY_DB_PATH') or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'economy.db')
+        self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.cur = self.conn.cursor()
         self.cur.execute("""CREATE TABLE IF NOT EXISTS economy (

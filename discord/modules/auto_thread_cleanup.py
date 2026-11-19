@@ -1,92 +1,84 @@
 import asyncio
+import logging
+
 import nextcord as discord
-import sys
 
-# Set your game channel ID (timeout is now loaded from config)
+from modules.helpers import THREAD_TIMEOUT_MINUTES, THREAD_CLEANUP_CHECK_SECONDS, CASINO_CHANNEL_ID
+
+logger = logging.getLogger(__name__)
 
 
-# Import thread timeout from shared config
-from modules.helpers import THREAD_TIMEOUT_MINUTES, THREAD_CLEANUP_CHECK_SECONDS, CASINO_CHANNEL_ID as GAME_CHANNEL_ID
+async def _collect_threads(channel) -> list:
+    """Cached + active (from the API) + recently archived threads of the casino channel."""
+    found = {t.id: t for t in channel.threads}
+    # Cache misses are the usual reason threads were "found" but never seen: ask Discord too.
+    try:
+        for t in await channel.guild.active_threads():
+            if t.parent_id == channel.id:
+                found[t.id] = t
+    except Exception as e:
+        logger.warning("[Thread Cleanup] Could not fetch active threads: %s", e)
+    try:
+        async for t in channel.archived_threads(limit=50):
+            found[t.id] = t
+    except Exception as e:
+        logger.warning("[Thread Cleanup] Could not fetch archived threads: %s", e)
+    return list(found.values())
 
-# Debug: Print loaded config values at import
-# print(f"[Thread Cleanup][DEBUG] Loaded config: TIMEOUT_MINUTES={THREAD_TIMEOUT_MINUTES}, CLEANUP_CHECK_SECONDS={THREAD_CLEANUP_CHECK_SECONDS}")
+
+async def _last_activity(thread):
+    """Time of the newest message, falling back to the thread's creation time."""
+    try:
+        async for msg in thread.history(limit=1):
+            return msg.created_at
+    except Exception as e:
+        logger.warning("[Thread Cleanup] Could not read history of %r (%s): %s", thread.name, thread.id, e)
+    return thread.created_at
+
+
+async def cleanup_threads_once(client) -> int:
+    """Delete expired threads in the casino channel. Returns how many were deleted."""
+    channel = client.get_channel(CASINO_CHANNEL_ID)
+    if not channel:
+        logger.error("[Thread Cleanup] Channel with ID %s not found.", CASINO_CHANNEL_ID)
+        return 0
+    threads = await _collect_threads(channel)
+    logger.info("[Thread Cleanup] Channel %r (ID: %s), threads: %d", channel.name, channel.id, len(threads))
+    now = discord.utils.utcnow()
+    deleted = 0
+    for thread in threads:
+        last = await _last_activity(thread)
+        if last is None or (now - last).total_seconds() <= THREAD_TIMEOUT_MINUTES * 60:
+            continue
+        try:
+            await thread.delete()
+            deleted += 1
+            logger.info("[Thread Cleanup] Deleted thread %r (ID: %s)", thread.name, thread.id)
+        except discord.Forbidden:
+            logger.error("[Thread Cleanup] Missing Manage Threads permission to delete %r (ID: %s)", thread.name, thread.id)
+        except discord.NotFound:
+            logger.warning("[Thread Cleanup] Thread %r (ID: %s) not found, already deleted?", thread.name, thread.id)
+        except Exception as e:
+            logger.error("[Thread Cleanup] Error deleting thread %r (ID: %s): %s", thread.name, thread.id, e)
+    return deleted
+
 
 def setup_auto_thread_cleanup(client):
-    async def auto_delete_dormant_threads():
-        safe_print(f"[Thread Cleanup] Cleanup task started. Looking for channel ID: {GAME_CHANNEL_ID}")
+    async def loop():
         await client.wait_until_ready()
+        logger.info("[Thread Cleanup] Cleanup task started for channel %s", CASINO_CHANNEL_ID)
         while not client.is_closed():
             try:
-                channel = client.get_channel(GAME_CHANNEL_ID)
-                if not channel:
-                    safe_print(f"[Thread Cleanup][ERROR] Channel with ID {GAME_CHANNEL_ID} not found.")
-                else:
-                    safe_print(f"[Thread Cleanup] Found channel: {repr(channel.name)} (ID: {channel.id}), threads: {len(channel.threads)}")
-                    now = discord.utils.utcnow()
-                    for thread in channel.threads:
-                        # Use thread object from cache (channel.threads)
-                        if thread.archived:
-                            continue
-                        created_at = getattr(thread, 'created_at', None)
-                        updated_at = getattr(thread, 'updated_at', None)
-                        last_message_id = getattr(thread, 'last_message_id', None)
-                        last_active = updated_at or created_at
-                        try:
-                            age_seconds = (now - last_active).total_seconds() if last_active else None
-                        except Exception as e:
-                            safe_print(f"[Thread Cleanup][ERROR] Exception calculating age_seconds: {e}")
-                            age_seconds = None
-                        # Only log when actually purging a thread
-                        if age_seconds is not None and age_seconds > THREAD_TIMEOUT_MINUTES * 60:
-                            safe_print(f"[Thread Cleanup] Purging thread: {repr(thread.name)} (ID: {thread.id}) in channel {repr(channel.name)} (ID: {channel.id}), age: {age_seconds:.1f}s")
-                            try:
-                                await thread.delete()
-                            except Exception as e:
-                                safe_print(f"[Thread Cleanup] Error deleting thread {repr(thread.name)} (ID: {thread.id}): {e}")
+                await cleanup_threads_once(client)
             except Exception as e:
-                safe_print(f"[Thread Cleanup][ERROR] Exception in cleanup loop: {e}")
+                logger.error("[Thread Cleanup] Exception in cleanup loop: %s", e)
             await asyncio.sleep(THREAD_CLEANUP_CHECK_SECONDS)
-    client.loop.create_task(auto_delete_dormant_threads())
+    client.loop.create_task(loop())
 
-def safe_print(*args, **kwargs):
-    s = ' '.join(str(a) for a in args)
-    try:
-        print(s, **kwargs, flush=True)
-    except UnicodeEncodeError:
-        # Always encode as utf-8 and replace errors for Windows console
-        print(s.encode('utf-8', errors='replace').decode('utf-8'), **kwargs, flush=True)
 
-async def run_thread_cleanup(client):
-    """Manually trigger the thread cleanup once (cached threads only)."""
-    safe_print("[Thread Cleanup] Manual cleanup triggered.")
-    channel = client.get_channel(GAME_CHANNEL_ID)
-    if not channel:
-        safe_print(f"[Thread Cleanup] Channel with ID {GAME_CHANNEL_ID} not found.")
-        return
-    threads = list(channel.threads)
-    # Remove duplicates by thread ID (shouldn't be needed, but for safety)
-    seen = set()
-    unique_threads = []
-    for t in threads:
-        if t.id not in seen:
-            unique_threads.append(t)
-            seen.add(t.id)
-    safe_print(f"[Thread Cleanup] Found channel: {repr(channel.name)} (ID: {channel.id}), threads: {len(unique_threads)}")
-    now = discord.utils.utcnow()
-    for thread in unique_threads:
-        # Use thread object from cache (unique_threads)
-        safe_print(f"[Thread Cleanup] Checking thread: {repr(thread.name)} (ID: {thread.id}), archived: {thread.archived}")
-        if thread.archived:
-            continue
-        created_at = getattr(thread, 'created_at', None)
-        updated_at = getattr(thread, 'updated_at', None)
-        last_message_id = getattr(thread, 'last_message_id', None)
-        last_active = updated_at or created_at
-        age_seconds = (now - last_active).total_seconds() if last_active else None
-        safe_print(f"[Thread Cleanup] created_at: {created_at}, updated_at: {updated_at}, last_message_id: {last_message_id}, now: {now}, age: {age_seconds:.1f}s, timeout: {THREAD_TIMEOUT_MINUTES*60}s")
-        if age_seconds is not None and age_seconds > THREAD_TIMEOUT_MINUTES * 60:
-            safe_print(f"[Thread Cleanup] Purging thread: {repr(thread.name)} (ID: {thread.id}) in channel {repr(channel.name)} (ID: {channel.id}), age: {age_seconds:.1f}s")
-            try:
-                await thread.delete()
-            except Exception as e:
-                safe_print(f"[Thread Cleanup] Error deleting thread {repr(thread.name)} (ID: {thread.id}): {e}")
+async def run_thread_cleanup(client) -> int:
+    """Manually trigger one cleanup pass; returns the number of threads deleted."""
+    logger.info("[Thread Cleanup] Manual cleanup triggered.")
+    deleted = await cleanup_threads_once(client)
+    logger.info("[Thread Cleanup] Manual cleanup deleted %d thread(s).", deleted)
+    return deleted

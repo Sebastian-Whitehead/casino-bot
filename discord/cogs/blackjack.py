@@ -1,27 +1,28 @@
+import io
+import os
+import random
+
+import nextcord
 from nextcord import ui, Interaction, ButtonStyle
 from nextcord.ext import commands
-import nextcord
-import random
+
 from modules.card import Card
-from modules.economy import Economy
-from modules.helpers import *
+from modules.helpers import make_embed, payout, BLACKJACK_MULT, BLACKJACK_BJ_MULT, DEFAULT_BET
 from modules.base_betting_view import BaseBettingView
-from modules.base_game_cog import BettingGameCog
+from modules.base_game_cog import BaseGameCog, Outcome
+from modules.game_ui import format_chips, safe_edit, safe_send
+
 
 class BettingView(BaseBettingView):
-    bet_title = "Set your bet"
-
     def __init__(self, cog, user, bet, thread):
         super().__init__(cog, user, bet, thread)
+        self.bet_in_play = 0
+        self.in_round = False  # True from Start until the hand is settled
 
     @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="bet_start")
     async def bet_start(self, button, interaction: Interaction):
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-        except Exception as e:
-            print(f"[Blackjack] Error deferring interaction: {e}")
-        await self.cog.start_game(self, interaction)
+        await self.cog.start_round(self, interaction)
+
 
 class GameView(ui.View):
     def __init__(self, cog, user, bet, thread, deck, player_hand, dealer_hand, betting_view):
@@ -35,25 +36,175 @@ class GameView(ui.View):
         self.dealer_hand = dealer_hand
         self.betting_view = betting_view
         self.game_message = None
+        self.finished = False
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         return interaction.user.id == self.user.id
 
+    async def _ack(self, interaction):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception as e:
+            print(f"[Blackjack] Error deferring interaction: {e}")
+
     @ui.button(label="Hit", style=ButtonStyle.success, custom_id="hit")
     async def hit(self, button, interaction: Interaction):
-        self.player_hand.append(self.deck.pop())
-        await self.cog.continue_game(self, interaction)
+        if self.finished:
+            return
+        self.player_hand.append(self.deck.pop())  # no await before this: double click is safe
+        await self._ack(interaction)
+        await self.cog.continue_game(self)
 
     @ui.button(label="Stand", style=ButtonStyle.primary, custom_id="stand")
     async def stand(self, button, interaction: Interaction):
-        await self.cog.dealer_play(self, interaction)
+        if self.finished:
+            return
+        await self._ack(interaction)
+        await self.cog.dealer_play(self)
 
-class Blackjack(BettingGameCog, commands.Cog):
+    async def on_timeout(self):
+        await self.cog.dealer_play(self)  # auto-stand so the round never stays stuck
+
+
+class Blackjack(BaseGameCog, commands.Cog):
+    game_name = "Blackjack"
+
+    def __init__(self, client: commands.Bot):
+        self.client = client
+        from modules.economy import Economy
+        self.economy = Economy()
+        self.active_games = {}  # {thread_id: BettingView}
+        self.default_bet = DEFAULT_BET
+
+    @nextcord.slash_command(description="Play a simple game of blackjack with chips.")
+    async def blackjack(self, interaction: nextcord.Interaction):
+        await self.open_game(interaction, BettingView)
+
+    def refund_open_round(self, view):
+        if view is not None and view.in_round:
+            view.in_round = False
+            try:
+                self.economy.pay_out(view.user.id, view.bet_in_play)  # hand abandoned: refund the stake
+            except Exception as e:
+                print(f"[Blackjack] Refund failed: {e}")
+
+    async def end_game_by_thread(self, thread_id):
+        self.refund_open_round(self.active_games.get(thread_id))
+        await super().end_game_by_thread(thread_id)
+
+    async def start_round(self, betting_view, interaction, **choice):
+        """Start button and Play Again: deduct the bet, deal, show Hit/Stand."""
+        if betting_view.in_round:  # double click or a round already running
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+            except Exception:
+                pass
+            return
+        betting_view.in_round = True
+        try:
+            if not await self.prepare_bet_round(betting_view, interaction):
+                betting_view.in_round = False
+                return
+        except Exception:
+            betting_view.in_round = False
+            raise
+        betting_view.bet_in_play = betting_view.bet
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            deck = [Card(suit, value, down=False) for value in range(2, 15) for suit in Card.suits]
+            random.shuffle(deck)
+            player_hand = [deck.pop(), deck.pop()]
+            dealer_hand = [deck.pop(), deck.pop().flip()]
+            game_view = GameView(self, betting_view.user, betting_view.bet, betting_view.thread,
+                                 deck, player_hand, dealer_hand, betting_view)
+            if len(player_hand) == 2 and self.calc_hand(player_hand) == 21:
+                dealer_hand[1].flip()
+                natural = self.calc_hand(dealer_hand) != 21
+                game_view.finished = True
+                await self.finish(game_view, "Blackjack!" if natural else "Push",
+                                  natural, payout(game_view.bet, BLACKJACK_BJ_MULT) if natural else game_view.bet)
+                return
+            await self.replace_game_message(game_view, "Your Turn")
+        except Exception:
+            # shortcut: refunds only the common failure path; a crash mid-hand keeps the stake with the casino
+            if betting_view.in_round:
+                betting_view.in_round = False
+                self.economy.pay_out(betting_view.user.id, betting_view.bet_in_play)
+            raise
+
+    async def continue_game(self, game_view: GameView):
+        score = self.calc_hand(game_view.player_hand)
+        if score > 21:
+            game_view.finished = True
+            game_view.dealer_hand[1].down = False
+            await self.finish(game_view, "Player busts", False, 0)
+        elif score == 21:
+            await self.dealer_play(game_view)
+        else:
+            await self.replace_game_message(game_view, "Your Turn")
+
+    async def dealer_play(self, game_view: GameView):
+        if game_view.finished:
+            return
+        game_view.finished = True
+        dealer = game_view.dealer_hand
+        dealer[1].down = False
+        player_score = self.calc_hand(game_view.player_hand)
+        dealer_score = self.calc_hand(dealer)
+        while dealer_score < 17:
+            dealer.append(game_view.deck.pop())
+            dealer_score = self.calc_hand(dealer)
+        bet = game_view.bet
+        if dealer_score > 21:
+            result = ("Dealer busts", True, payout(bet, BLACKJACK_MULT))
+        elif dealer_score == player_score:
+            result = ("Push", False, bet)
+        elif dealer_score > player_score:
+            result = ("Dealer blackjack" if dealer_score == 21 and len(dealer) == 2 else "You lose!", False, 0)
+        else:
+            result = ("You win!", True, payout(bet, BLACKJACK_MULT))
+        await self.finish(game_view, *result)
+
+    async def finish(self, game_view: GameView, title, won, amount):
+        game_view.stop()
+        bv = game_view.betting_view
+        bv.bet = game_view.bet  # the bet buttons may have moved it mid-hand
+        if game_view.game_message:
+            try:
+                await game_view.game_message.delete()
+            except Exception:
+                pass
+        description = (f"Your hand: {self.calc_hand(game_view.player_hand)}\n"
+                       f"Dealer's hand: {self.calc_hand(game_view.dealer_hand)}")
+        try:
+            file = self.render_file(game_view.user.id, game_view.dealer_hand, game_view.player_hand)
+            await self.settle(bv, Outcome(won, amount, title, description, file), {})
+        finally:
+            bv.in_round = False
+
+    async def replace_game_message(self, game_view, title):
+        if game_view.game_message:
+            try:
+                await game_view.game_message.delete()
+            except Exception:
+                pass
+        embed = make_embed(
+            title=title,
+            description=(f"Bet: {format_chips(game_view.bet)}\n"
+                         f"Your hand: {self.calc_hand(game_view.player_hand)}\n"
+                         f"Dealer's hand: {self.calc_hand(game_view.dealer_hand)}"))
+        file = self.render_file(game_view.user.id, game_view.dealer_hand, game_view.player_hand)
+        embed.set_image(url=f"attachment://{file.filename}")
+        msg = await safe_send(game_view.thread, embed=embed, file=file, view=game_view)
+        game_view.game_message = msg
+        game_view.betting_view.game_message = msg
 
     def hand_to_images(self, hand):
         # Loads card images using card.image property (handles face down)
         from PIL import Image
-        import os
         images = []
         card_dir = os.path.join(os.path.dirname(__file__), '..', 'modules', 'cards')
         for card in hand:
@@ -71,7 +222,6 @@ class Blackjack(BettingGameCog, commands.Cog):
     def center(self, *hands):
         # Creates blackjack table with cards placed
         from PIL import Image
-        import os
         table_path = os.path.join(os.path.dirname(__file__), '..', 'modules', 'table.png')
         bg = Image.open(table_path).convert('RGBA')
         bg_center_x = bg.size[0] // 2
@@ -79,7 +229,7 @@ class Blackjack(BettingGameCog, commands.Cog):
         if not hands or not hands[0]:
             return bg
         img_w, img_h = hands[0][0].size
-        start_y = bg_center_y - (((len(hands)*img_h) + ((len(hands) - 1) * 15) ) // 2)
+        start_y = bg_center_y - (((len(hands)*img_h) + ((len(hands) - 1) * 15)) // 2)
         for hand in hands:
             start_x = bg_center_x - (((len(hand)*img_w) + ((len(hand) - 1) * 10)) // 2)
             for card in hand:
@@ -87,234 +237,34 @@ class Blackjack(BettingGameCog, commands.Cog):
                 start_x += img_w + 10
             start_y += img_h + 15
         return bg
-    async def end_game_by_thread(self, thread_id):
-        view = self.active_games.pop(thread_id, None)
-        if view:
-            try:
-                if view.game_message:
-                    await view.game_message.delete()
-            except Exception:
-                pass
-            try:
-                if view.bet_message:
-                    await view.bet_message.edit(view=None)
-            except Exception:
-                pass
-            try:
-                await view.thread.send("Game ended due to inactivity.")
-            except Exception:
-                pass
-            try:
-                await view.thread.edit(archived=True, locked=True)
-            except Exception:
-                pass
 
-    from modules.helpers import TEST_GUILD_ID
-    USE_TEST_GUILD = False  # Set to True for fast test registration
+    def output(self, name, *hands):
+        self.center(*map(self.hand_to_images, hands)).save(f'{name}.png')
 
-    def __init__(self, client: commands.Bot):
-        self.client = client
-        from modules.economy import Economy
-        from modules.helpers import DEFAULT_BET
-        self.economy = Economy()
-        self.active_games = {}  # {thread_id: BettingView}
-        self.default_bet = DEFAULT_BET
-
-    @nextcord.slash_command(
-        description="Play a simple game of blackjack. Bet must be greater than $0",
-        **({"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {})
-    )
-    async def blackjack(self, interaction: nextcord.Interaction):
-        from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
-        if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
-            await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
-            return
-        if interaction.response.is_done():
-            print("[Blackjack] Interaction already responded to, aborting.")
-            return
+    def render_file(self, user_id, dealer_hand, player_hand):
+        """Render the table to a temp PNG, load it into memory and always delete the temp file."""
+        path = f'{user_id}.png'
         try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            print(f"[Blackjack] Error deferring interaction: {e}")
-            return
-        try:
-            await interaction.followup.send("Game started! ✅", ephemeral=True)
-        except Exception as e:
-            print(f"[Blackjack] Error sending followup: {e}")
-        thread = await interaction.channel.create_thread(
-            name=f"Blackjack - {interaction.user.display_name}",
-            type=nextcord.ChannelType.public_thread
-        )
-        balance = self.economy.get_entry(interaction.user.id)[1]
-        bet = min(self.default_bet, balance) if balance > 0 else 1
-        view = BettingView(self, interaction.user, bet, thread)
-        embed = view.bet_embed()
-        msg = await thread.send(embed=embed, view=view)
-        view.bet_message = msg
-
-    async def start_game(self, betting_view: BettingView, interaction: Interaction):
-        ready = await self.prepare_bet_round(
-            betting_view,
-            interaction,
-            "You do not have enough money to place this bet! (You have ${balance}, bet is ${bet})"
-        )
-        if not ready:
-            return
-        deck = [
-            Card(suit, value, down=False)
-            for value in range(2, 15)
-            for suit in Card.suits
-        ]
-        random.shuffle(deck)
-        player_hand = [deck.pop(), deck.pop()]
-        dealer_hand = [deck.pop(), deck.pop().flip()]
-        game_view = GameView(
-            self,
-            betting_view.user,
-            betting_view.bet,
-            betting_view.thread,
-            deck,
-            player_hand,
-            dealer_hand,
-            betting_view,
-        )
-        msg = await self.send_game_message(game_view, "Your Turn", player_hand, dealer_hand)
-        betting_view.game_message = msg
-        game_view.game_message = msg
-
-    async def continue_game(self, game_view: GameView, interaction: Interaction):
-        player_score = self.calc_hand(game_view.player_hand)
-        dealer_score = self.calc_hand(game_view.dealer_hand)
-        from modules.helpers import BLACKJACK_BJ_MULT
-        if player_score == 21:
-            win_amt = int(game_view.bet * BLACKJACK_BJ_MULT)
-            self.economy.add_money(game_view.user.id, win_amt)
-            await self.show_result(game_view, interaction, ("Blackjack!", 'won', win_amt))
-            return
-        elif player_score > 21:
-            # Already lost bet
-            await self.show_result(game_view, interaction, ("Player busts", 'lost', 0))
-            return
-        await self.replace_game_message(game_view, "Your Turn", game_view.player_hand, game_view.dealer_hand)
-
-    async def dealer_play(self, game_view: GameView, interaction: Interaction):
-        game_view.dealer_hand[1].flip()
-        player_score = self.calc_hand(game_view.player_hand)
-        dealer_score = self.calc_hand(game_view.dealer_hand)
-        while dealer_score < 17:
-            game_view.dealer_hand.append(game_view.deck.pop())
-            dealer_score = self.calc_hand(game_view.dealer_hand)
-        from modules.helpers import BLACKJACK_MULT
-        if dealer_score == 21:
-            # Already lost bet
-            result = ('Dealer blackjack', 'lost', 0)
-        elif dealer_score > 21:
-            win_amt = int(game_view.bet * BLACKJACK_MULT)
-            self.economy.add_money(game_view.user.id, win_amt)
-            result = ("Dealer busts", 'won', win_amt)
-        elif dealer_score == player_score:
-            self.economy.add_money(game_view.user.id, game_view.bet)
-            result = ("Tie!", 'kept', game_view.bet)
-        elif dealer_score > player_score:
-            # Already lost bet
-            result = ("You lose!", 'lost', 0)
-        elif dealer_score < player_score:
-            win_amt = int(game_view.bet * BLACKJACK_MULT)
-            self.economy.add_money(game_view.user.id, win_amt)
-            result = ("You win!", 'won', win_amt)
-        await self.show_result(game_view, interaction, result)
-
-    async def show_result(self, game_view: GameView, interaction: Interaction, result):
-        player_score = self.calc_hand(game_view.player_hand)
-        dealer_score = self.calc_hand(game_view.dealer_hand)
-        color = (
-            nextcord.Color.red() if result[1] == 'lost'
-            else nextcord.Color.green() if result[1] == 'won'
-            else nextcord.Color.blue()
-        )
-        embed = make_embed(
-            title=result[0],
-            color=color,
-            description=(
-                f"**You {result[1]} ${abs(result[2])}**\nYour hand: {player_score}\n" +
-                f"Dealer's hand: {dealer_score}"
-            )
-        )
-        # --- Game result logging ---
-        print(f"[Blackjack] User: {game_view.user} (ID: {game_view.user.id}), Bet: ${game_view.bet}, Result: {result[1]}, Amount: {abs(result[2])}, Player hand: {player_score}, Dealer hand: {dealer_score}")
-        self.output(game_view.user.id, game_view.dealer_hand, game_view.player_hand)
-        file = nextcord.File(f"{game_view.user.id}.png", filename=f"{game_view.user.id}.png")
-        embed.set_image(url=f"attachment://{game_view.user.id}.png")
-        try:
-            await game_view.game_message.delete()
-        except nextcord.errors.NotFound:
-            pass
-        except Exception as e:
-            print(f"[Blackjack] Error deleting game message: {e}")
-        view = ui.View()  # No buttons
-        msg = await game_view.thread.send(embed=embed, file=file, view=view)
-        game_view.betting_view.game_message = msg
-        # Update wallet in betting window
-        balance = self.economy.get_entry(game_view.user.id)[1]
-        game_view.betting_view.bet = game_view.bet
-        bet_embed = make_embed(
-            title="Set your bet",
-            description=f"Current bet: ${game_view.bet}\nWallet: ${balance}\nAdjust your bet with 5/6, then press Start."
-        )
-        await game_view.betting_view.bet_message.edit(embed=bet_embed, view=game_view.betting_view)
-        import time
-        for _ in range(5):
+            self.output(user_id, dealer_hand, player_hand)
+            with open(path, 'rb') as f:
+                data = io.BytesIO(f.read())
+        finally:
             try:
-                os.remove(f'./{game_view.user.id}.png')
-                break
-            except PermissionError:
-                time.sleep(0.1)
-            except Exception as e:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
                 print(f"[Blackjack] Error deleting image file: {e}")
-                break
-
-    async def send_game_message(self, game_view, title, player_hand, dealer_hand):
-        player_score = self.calc_hand(player_hand)
-        dealer_score = self.calc_hand(dealer_hand)
-        # Commented out hand debugging (card details)
-        embed = make_embed(
-            title=title,
-            description=f"Bet: ${game_view.bet}\nYour hand: {player_score}\nDealer's hand: {dealer_score}"
-        )
-        self.output(game_view.user.id, dealer_hand, player_hand)
-        file = nextcord.File(f"{game_view.user.id}.png", filename=f"{game_view.user.id}.png")
-        embed.set_image(url=f"attachment://{game_view.user.id}.png")
-        msg = await game_view.thread.send(embed=embed, file=file, view=game_view)
-        os.remove(f'./{game_view.user.id}.png')
-        return msg
-
-    async def replace_game_message(self, game_view, title, player_hand, dealer_hand):
-        try:
-            await game_view.game_message.delete()
-        except Exception:
-            pass
-        msg = await self.send_game_message(game_view, title, player_hand, dealer_hand)
-        game_view.betting_view.game_message = msg
-        game_view.game_message = msg
+        return nextcord.File(data, filename=f"{user_id}.png")
 
     @staticmethod
     def calc_hand(hand: list) -> int:
-        non_aces = [c for c in hand if c.symbol != 'A']
-        aces = [c for c in hand if c.symbol == 'A']
-        total = 0
-        for card in non_aces:
-            if not card.down:
-                if card.symbol in 'JQK': total += 10
-                else: total += card.value
-        for card in aces:
-            if not card.down:
-                if total <= 10: total += 11
-                else: total += 1
+        cards = [c for c in hand if not c.down]
+        total = sum(1 if c.symbol == 'A' else 10 if c.symbol in 'JQK' else c.value for c in cards)
+        if any(c.symbol == 'A' for c in cards) and total + 10 <= 21:
+            total += 10  # one ace may count 11
         return total
 
-    def output(self, name, *hands):
-        # ...existing code for image output...
-        self.center(*map(self.hand_to_images, hands)).save(f'{name}.png')
 
 def setup(client: commands.Bot):
     client.add_cog(Blackjack(client))

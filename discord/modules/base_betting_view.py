@@ -1,10 +1,9 @@
 from nextcord import ui, Interaction, ButtonStyle
 from modules.helpers import make_embed
+from modules.game_ui import format_chips, safe_edit
 
 class BaseBettingView(ui.View):
-    balance_index = 1
-    bet_title = "Set your bet ($)"
-    currency_name = "cash"
+    min_bet = 1  # per-game override, used by cap_bet
 
     def __init__(self, cog, user, bet, thread):
         super().__init__(timeout=None)
@@ -15,24 +14,20 @@ class BaseBettingView(ui.View):
         self.bet_message = None
         self.game_message = None
 
-    def cap_bet(self, new_bet: int) -> int:
-        balance = self.cog.economy.get_entry(self.user.id)[self.balance_index]
-        return max(1, min(new_bet, balance))
+    def get_balance(self) -> int:
+        return self.cog.economy.get_chips(self.user.id)
 
-    def get_balance(self):
-        return self.cog.economy.get_entry(self.user.id)[self.balance_index]
+    def cap_bet(self, new_bet: int) -> int:
+        return max(self.min_bet, min(new_bet, self.get_balance()))
 
     def bet_embed(self):
-        balance = self.get_balance()
-        if self.currency_name == "credits":
-            description = f"Current bet: {self.bet} credits\nWallet: {balance} credits"
-        else:
-            description = f"Current bet: ${self.bet}\nWallet: ${balance}"
-        return make_embed(title=self.bet_title, description=description)
+        return make_embed(
+            title="Set your bet",
+            description=f"Current bet: {format_chips(self.bet)}\nWallet: {format_chips(self.get_balance())}")
 
     async def refresh_bet_message(self):
         if self.bet_message:
-            await self.bet_message.edit(embed=self.bet_embed(), view=self)
+            await safe_edit(self.bet_message, embed=self.bet_embed(), view=self)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         return interaction.user.id == self.user.id
@@ -82,6 +77,10 @@ class BaseBettingView(ui.View):
                     "Game ended and thread closed.", ephemeral=True)
         except Exception:
             pass
+        refund = getattr(self.cog, "refund_open_round", None)
+        if refund:  # e.g. blackjack: closing mid-hand must not keep the stake
+            refund(self)
+        getattr(self.cog, "active_games", {}).pop(self.thread.id, None)
         try:
             await self.thread.edit(archived=True, locked=True)
         except Exception:
