@@ -1,4 +1,3 @@
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -20,29 +19,18 @@ os.chdir(Path(__file__).parent.parent)
 ABS_PATH = Path(os.getcwd())
 COG_FOLDER = os.path.join(ABS_PATH, 'cogs/')
 
-# Settings and IDs live in config.json (committed). The token is a secret:
-# DISCORD_TOKEN env var, or `bot.token` in the git-ignored config.yml.
-with open(os.path.join(ABS_PATH.parent, 'config.json'), encoding='utf-8') as f:
-    config = json.load(f)
+with open(os.path.join(ABS_PATH.parent, 'config.yml'), encoding='utf-8') as f:
+    config_raw = yaml.safe_load(f.read())
+    config = config_raw.get('bot', {})
 
-
-def _load_token():
-    token = os.environ.get('DISCORD_TOKEN')
-    if token:
-        return token
-    yml = os.path.join(ABS_PATH.parent, 'config.yml')
-    if os.path.exists(yml):
-        with open(yml, encoding='utf-8') as f:
-            return ((yaml.safe_load(f) or {}).get('bot') or {}).get('token')
-
-
-TOKEN = _load_token()
+# DISCORD_TOKEN env var overrides the token in config.yml (handy for Docker)
+TOKEN = os.environ.get('DISCORD_TOKEN') or config.get('token')
 
 TRACK_CASINO_BALANCE = config.get('track_casino_balance', True)
 TEST_GUILD_ID = config.get('test_guild_id')
 CASINO_CHANNEL_ID = config.get('casino_channel_id')
-THREAD_TIMEOUT_MINUTES = config.get('thread_timeout_minutes', 60)
-THREAD_CLEANUP_CHECK_SECONDS = config.get('thread_cleanup_check_seconds', 60)
+THREAD_TIMEOUT_MINUTES = config_raw.get('thread_timeout_minutes', 60)
+THREAD_CLEANUP_CHECK_SECONDS = config_raw.get('thread_cleanup_check_seconds', 60)
 
 COINFLIP_MULT = config.get('coinflip_multiplier', 2)
 BLACKJACK_MULT = config.get('blackjack_multiplier', 2)

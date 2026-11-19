@@ -1,4 +1,36 @@
-# RENAME FILE TO 'config.yml' (git-ignored). Secrets only; all other settings are in config.json.
-# Alternative: set the DISCORD_TOKEN environment variable (e.g. in a .env file for docker compose).
+# RENAME FILE TO 'config.yml'
 bot:
+  # --- Discord/Bot Settings ---
   token: "YOUR_DISCORD_BOT_TOKEN_HERE"
+  owner_ids:
+    - 142876809992601601
+  prefix: "!"
+  test_guild_id: 629027778347532298  # Guild ID for slash command registration/testing
+  casino_channel_id: 1409120191534858361 # Channel ID where casino commands are allowed (replace with your channel)
+  restrict_to_casino_channel: true # Toggle to restrict casino commands to the casino channel
+  casino_user_id: 1406929502470410291 # User ID used for the casino's bank/balance (should match the bot's user ID)
+
+  # --- Economy/Betting Defaults ---
+  default_bet: 10  # Default bet for blackjack and monetary games
+  slots_default_bet: 1  # Default bet for slots (in credits)
+  token_price: 10  # Price of one slot credit in $ (monetary value)
+  bonus_cooldown: 12 # Bonus every x hours
+  track_casino_balance: true # Toggle for tracking casino balance (set false to disable casino bank logic)
+
+  # --- Multipliers/Payouts ---
+  bonus_multiplier: 5 # bonus = default_bet * multiplier
+  dice_multiplier: 5 # payout multiplier for dice guessing game
+  coinflip_multiplier: 1.5 # payout multiplier for coinflip (default 2)
+  blackjack_multiplier: 2 # payout multiplier for blackjack win (default 2)
+  blackjack_blackjack_multiplier: 2.5 # payout for player blackjack (default 2.5)
+  challenge_fee_enabled: true # Take a fee from the combined challenge pot
+  challenge_fee_percent: 5 # Percentage of the combined challenge pot kept by the casino
+  # slots_multipliers: List of payout multipliers for each slot symbol, in order:
+  #   [cherry, seven, bell, bar, lemon, grape]
+  #   e.g. [4, 80, 40, 25, 10, 5] means:
+  #     cherry = 4x, seven = 80x, bell = 40x, bar = 25x, lemon = 10x, grape = 5x
+  slots_multipliers: [4, 80, 40, 25, 10, 5] # payout multipliers for slots symbols (see above)
+
+# --- Thread/Channel Cleanup ---
+thread_timeout_minutes: 10 # Threads older than this (minutes) will be deleted by cleanup
+thread_cleanup_check_seconds: 180 # How often to check for expired threads (seconds)

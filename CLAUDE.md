@@ -7,14 +7,14 @@ Detailed repo map: `llm.txt`. Future economy-service extraction plan: `economy_s
 ## Run
 
 - `.venv` in the repo root; run `python discord/bot.py` from the repo root.
-- Settings and IDs are in `config.json` (committed). The token is a secret: `DISCORD_TOKEN` env var or `bot.token` in git-ignored `config.yml` (see `config.yml.example`). Never print, log or commit it.
+- Needs `config.yml` (copy `config.yml.example`). It holds the bot token and is gitignored — never print, log or commit it. `DISCORD_TOKEN` env var overrides the token. `*.db` is also gitignored.
 - Only check available: `python -m compileall -q discord modules`. There are no real tests (`test_economy.py` files are empty or manual scripts).
 
 ## Layout
 
 - `discord/` is the active tree. Root `modules/` and `discord/cogs/legacy_gambling.py` are dead (the latter is skipped by the cog loader in `bot.py`). `cogs/gambling_helpers.py` and `cogs/handlers.py` are older prefix-command code that still loads.
 - `discord/bot.py`: bot setup, owner slash commands, loads every `cogs/*.py`, binds the casino account to `client.user.id` in `on_ready`.
-- `modules/helpers.py`: loads `../config.json`, exposes config constants, `make_embed`. **It calls `os.chdir` to `discord/` on import**, so relative paths resolve from there. Use `__file__`-based paths.
+- `modules/helpers.py`: loads `../config.yml`, exposes config constants, `make_embed`. **It calls `os.chdir` to `discord/` on import**, so relative paths resolve from there. Use `__file__`-based paths.
 - `modules/economy.py`: singleton `Economy`. Row tuple is `(user_id, money, credits)` — keep it stable. `add_money` for a non-casino user mirrors the opposite amount onto the casino and clamps balances at 0 instead of rejecting.
 - `modules/base_betting_view.py`: shared bet-adjust UI (`balance_index` 1=money, 2=credits).
 - `modules/base_game_cog.py` (`BettingGameCog.prepare_bet_round`): shared wager validation and deduction. `modules/challenge.py` (`ChallengeGameCog`): two-player stakes, fee, tie refund. Coinflip and dice inherit these.

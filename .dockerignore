@@ -10,4 +10,3 @@ pictures
 *.md
 *.txt
 !requirements.txt
-.env
