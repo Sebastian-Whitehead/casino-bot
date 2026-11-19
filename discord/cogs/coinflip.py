@@ -5,8 +5,11 @@ from nextcord import ui, Interaction, ButtonStyle
 from modules.economy import Economy
 from modules.helpers import make_embed, DEFAULT_BET
 from modules.base_betting_view import BaseBettingView
+from modules.challenge import ChallengeGameCog
 
 class CoinFlipBettingView(BaseBettingView):
+    bet_title = "Set your bet ($)"
+
     def __init__(self, cog, user, bet, thread):
         super().__init__(cog, user, bet, thread)
 
@@ -17,14 +20,6 @@ class CoinFlipBettingView(BaseBettingView):
     @ui.button(label="Tails", style=ButtonStyle.primary, row=3, custom_id="coinflip_tails")
     async def choose_tails(self, button, interaction: Interaction):
         await self.cog.start_coinflip_game(self, interaction, user_choice="tails")
-
-    async def update_bet_message(self, interaction):
-        balance = self.cog.economy.get_entry(self.user.id)[1]
-        embed = make_embed(
-            title="Set your bet ($)",
-            description=f"Current bet: ${self.bet}\nWallet: ${balance}"
-        )
-        await interaction.response.edit_message(embed=embed, view=self)
 
 class CoinFlipGameView(ui.View):
     async def interaction_check(self, interaction: Interaction) -> bool:
@@ -43,7 +38,7 @@ class CoinFlipGameView(ui.View):
     async def play_again(self, button, interaction: Interaction):
         await self.cog.start_coinflip_game(self.betting_view, interaction, user_choice=self.user_choice)
 
-class CoinFlip(commands.Cog):
+class CoinFlip(ChallengeGameCog, commands.Cog):
     def __init__(self, client: commands.Bot):
         self.client = client
         self.economy = Economy()
@@ -52,12 +47,26 @@ class CoinFlip(commands.Cog):
 
     @discord.slash_command(
         name="coinflip",
-        description="Flip a coin."
+        description="Flip a coin or challenge another user."
     )
-    async def coinflip(self, interaction: discord.Interaction):
+    async def coinflip(
+        self,
+        interaction: discord.Interaction,
+        opponent: discord.Member = None,
+        bet: int = None
+    ):
         from modules.helpers import CASINO_CHANNEL_ID, RESTRICT_TO_CASINO_CHANNEL
         if RESTRICT_TO_CASINO_CHANNEL and interaction.channel.id != CASINO_CHANNEL_ID:
             await interaction.response.send_message("This command can only be used in the designated casino channel.", ephemeral=True)
+            return
+        if opponent is not None or bet is not None:
+            if opponent is None or bet is None:
+                await interaction.response.send_message(
+                    "Provide both an opponent and a bet to create a challenge.",
+                    ephemeral=True
+                )
+                return
+            await self.open_challenge(interaction, opponent, bet, "Coin Flip")
             return
         if interaction.response.is_done():
             print("[CoinFlip] Coinflip interaction already responded to, aborting.")
@@ -75,38 +84,18 @@ class CoinFlip(commands.Cog):
         bet = min(self.default_bet, balance) if balance > 0 else 1
         view = CoinFlipBettingView(self, interaction.user, bet, thread)
         self.active_games[thread.id] = view
-        embed = make_embed(
-            title="Set your bet ($)",
-            description=f"Current bet: ${bet}\nWallet: ${balance}"
-        )
+        embed = view.bet_embed()
         msg = await thread.send(embed=embed, view=view)
         view.bet_message = msg
 
     async def start_coinflip_game(self, betting_view: CoinFlipBettingView, interaction: Interaction, user_choice: str):
-        balance = self.economy.get_entry(betting_view.user.id)[1]
-        if betting_view.bet > balance:
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"You do not have enough money to place this bet! (You have ${balance}, bet is ${betting_view.bet})",
-                        ephemeral=True
-                    )
-            except Exception as e:
-                print(f"[CoinFlip] Error sending not enough money message: {e}")
+        ready = await self.prepare_bet_round(
+            betting_view,
+            interaction,
+            "You do not have enough money to place this bet! (You have ${balance}, bet is ${bet})"
+        )
+        if not ready:
             return
-        self.economy.add_money(betting_view.user.id, -betting_view.bet)
-        if betting_view.bet_message:
-            balance = self.economy.get_entry(betting_view.user.id)[1]
-            bet_embed = make_embed(
-                title="Set your bet ($)",
-                description=f"Current bet: ${betting_view.bet}\nWallet: ${balance}"
-            )
-            await betting_view.bet_message.edit(embed=bet_embed, view=betting_view)
-        if betting_view.game_message:
-            try:
-                await betting_view.game_message.delete()
-            except Exception:
-                pass
         msg = await self.send_flip_message(betting_view, user_choice=user_choice)
         betting_view.game_message = msg
 
@@ -132,7 +121,33 @@ class CoinFlip(commands.Cog):
         view = CoinFlipGameView(self, betting_view.user, betting_view.bet, betting_view.thread, betting_view, user_choice)
         msg = await betting_view.thread.send(embed=embed, view=view, file=file)
         view.game_message = msg
+        await betting_view.refresh_bet_message()
         return msg
+
+    async def resolve_challenge(self, challenge):
+        result = random.choice(["heads", "tails"])
+        winner = (
+            challenge.challenger
+            if result == "heads"
+            else challenge.opponent
+        )
+        loser = (
+            challenge.opponent
+            if winner.id == challenge.challenger.id
+            else challenge.challenger
+        )
+        payout, fee = self.settle_challenge(winner.id, challenge.bet)
+        fee_text = f"\nCasino fee: ${fee}" if fee else ""
+        embed = make_embed(
+            title=f"Coin Flip: {result.capitalize()}",
+            description=(
+                f"{winner.mention} wins against {loser.mention}!\n"
+                f"{winner.mention} had heads; {loser.mention} had tails.\n"
+                f"Payout: ${payout}{fee_text}"
+            ),
+            color=discord.Color.green()
+        )
+        await challenge.thread.send(embed=embed)
 
 def setup(client):
     client.add_cog(CoinFlip(client))

@@ -12,11 +12,11 @@ class Leaderboard(commands.Cog):
     )
     async def casino_leaderboard(self, interaction: discord.Interaction) -> None:
         """Slash command to show the top 10 users by casino balance."""
-        from modules.economy import Economy, CASINO_USER_ID
+        from modules.economy import Economy
         econ = Economy()
         all_entries = econ.get_all_entries()  # Should return list of (user_id, money, credits)
         # Exclude the bot's own entry (CASINO_USER_ID)
-        filtered = [entry for entry in all_entries if entry[0] != CASINO_USER_ID]
+        filtered = [entry for entry in all_entries if entry[0] != econ.casino_user_id]
         top = sorted(filtered, key=lambda x: x[1], reverse=True)[:10]
         if not top:
             await interaction.response.send_message("No users found in the casino database.", ephemeral=True)

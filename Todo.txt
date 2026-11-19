@@ -1,14 +1,24 @@
-Broken:
-- Dice roll is broken
-- Wallet is not updating when a game ends
-- Casino balance is not tracking to casino bot user id
-- start button not present in the slots game
-- Thread tidy up is also broken and is finding but not deleting threads
+Completed:
+- [x] Dice roll UI fixed
+- [x] Wallet refreshes after games
+- [x] Slots Start button restored
+- [x] Coinflip and dice challenge games added
+- [x] Casino balance bound to the bot user ID
+
+Still Open:
+- [ ] Thread tidy up is finding but not deleting threads
 
 Nice to have:
-- Allow buying and selling of slots credits in slots thread
+- [x] Allow buying and selling of slots credits in slots thread
 
 Future Features:
-- Challenge In coin flipping and dice rolling
-- Roulette
-- Horse Race Betting
+- [ ] Roulette
+- [ ] Horse Race Betting
+
+Planned Infrastructure:
+- [ ] Implement the economy-service plan in `economy_service_plan.md`
+- [ ] Extract the economy into a standalone Dockerized service
+- [ ] Put a shared economy API between the bot and future tools
+- [ ] Prefer PostgreSQL for concurrent clients instead of direct SQLite access
+- [ ] Migrate the existing economy.db data into the service
+- [ ] Add transaction safety, an immutable ledger, idempotent game settlement, and client authentication

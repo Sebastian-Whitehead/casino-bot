@@ -5,10 +5,15 @@ from nextcord.ext import commands
 from nextcord import ui, Interaction, ButtonStyle
 from modules.helpers import *
 from modules.base_betting_view import BaseBettingView
+from modules.base_game_cog import BettingGameCog
 from PIL import Image
 
 
 class BettingView(BaseBettingView):
+    balance_index = 2
+    bet_title = "Set your bet (credits)"
+    currency_name = "credits"
+
     def __init__(self, cog, user, bet, thread):
         super().__init__(cog, user, bet, thread)
         self.auto_spin = False
@@ -40,6 +45,10 @@ class BettingView(BaseBettingView):
             await interaction.response.edit_message(view=self)
             await interaction.followup.send("Auto-spin stopped.", ephemeral=True)
 
+    @ui.button(label="Start", style=ButtonStyle.success, row=2, custom_id="slots_start")
+    async def start_spin(self, button, interaction: Interaction):
+        await self.cog.start_game(self, interaction)
+
     async def auto_spin_loop(self, interaction):
         import asyncio
         try:
@@ -54,17 +63,6 @@ class BettingView(BaseBettingView):
                 await self.cog.start_game(self, interaction)
         except asyncio.CancelledError:
             pass
-
-    async def update_bet_message(self, interaction):
-        balance = self.cog.economy.get_entry(self.user.id)[2]
-        embed = make_embed(
-            title="Set your bet (credits)",
-            description=(
-                f"Current bet: {self.bet} credits\nWallet: {balance} credits"
-            )
-        )
-        await interaction.response.edit_message(embed=embed, view=self)
-
 
 class GameView(ui.View):
     def __init__(self, cog, user, bet, thread, betting_view):
@@ -118,7 +116,7 @@ class GameView(ui.View):
                 print(f"[Slots] Error deferring interaction: {e}")
 
 
-class Slots(commands.Cog):
+class Slots(BettingGameCog, commands.Cog):
     def __init__(self, client: commands.Bot):
         self.client = client
         from modules.economy import Economy
@@ -169,12 +167,7 @@ class Slots(commands.Cog):
         )
         await thread.send(embed=instructions_embed)
         # Now send the betting window embed, WITHOUT buy/sell instructions
-        embed = make_embed(
-            title="Set your bet (credits)",
-            description=(
-                f"Current bet: {bet} credits\nWallet: {balance} credits"
-            )
-        )
+        embed = view.bet_embed()
         msg = await thread.send(embed=embed, view=view)
         view.bet_message = msg
     async def end_game_by_thread(self, thread_id):
@@ -204,30 +197,13 @@ class Slots(commands.Cog):
                 pass
 
     async def start_game(self, betting_view: BettingView, interaction: Interaction):
-        # Check for sufficient credits before starting
-        balance = self.economy.get_entry(betting_view.user.id)[2]
-        if betting_view.bet > balance:
-            await interaction.response.send_message(
-                f"You do not have enough credits to place this bet! (You have {balance}, bet is {betting_view.bet})",
-                ephemeral=True
-            )
+        ready = await self.prepare_bet_round(
+            betting_view,
+            interaction,
+            "You do not have enough credits to place this bet! (You have {balance}, bet is {bet})"
+        )
+        if not ready:
             return
-        # Subtract bet at game start
-        self.economy.add_credits(betting_view.user.id, -betting_view.bet)
-        # Update betting message to show new balance after bet is subtracted
-        if betting_view.bet_message:
-            balance = self.economy.get_entry(betting_view.user.id)[2]
-            bet_embed = make_embed(
-                title="Set your bet (credits)",
-                description=f"Current bet: {betting_view.bet} credits\nWallet: {balance} credits"
-            )
-            await betting_view.bet_message.edit(embed=bet_embed, view=betting_view)
-        # Delete old game message if it exists
-        if betting_view.game_message:
-            try:
-                await betting_view.game_message.delete()
-            except Exception:
-                pass
         # Play slot game
         msg = await self.send_game_message(betting_view, betting_view.bet)
         betting_view.game_message = msg
@@ -301,6 +277,13 @@ class Slots(commands.Cog):
         view = GameView(self, betting_view.user, bet, betting_view.thread, betting_view)
         msg = await betting_view.thread.send(file=file, embed=embed, view=view)
         view.game_message = msg
+        balance = self.economy.get_entry(betting_view.user.id)[2]
+        bet_embed = make_embed(
+            title="Set your bet (credits)",
+            description=f"Current bet: {betting_view.bet} credits\nWallet: {balance} credits"
+        )
+        if betting_view.bet_message:
+            await betting_view.bet_message.edit(embed=bet_embed, view=betting_view)
         os.remove(fp)
         return msg
 

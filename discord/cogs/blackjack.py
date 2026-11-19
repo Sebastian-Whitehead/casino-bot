@@ -6,8 +6,11 @@ from modules.card import Card
 from modules.economy import Economy
 from modules.helpers import *
 from modules.base_betting_view import BaseBettingView
+from modules.base_game_cog import BettingGameCog
 
 class BettingView(BaseBettingView):
+    bet_title = "Set your bet"
+
     def __init__(self, cog, user, bet, thread):
         super().__init__(cog, user, bet, thread)
 
@@ -19,14 +22,6 @@ class BettingView(BaseBettingView):
         except Exception as e:
             print(f"[Blackjack] Error deferring interaction: {e}")
         await self.cog.start_game(self, interaction)
-
-    async def update_bet_message(self, interaction):
-        balance = self.cog.economy.get_entry(self.user.id)[1]
-        embed = make_embed(
-            title="Set your bet",
-            description=f"Current bet: ${self.bet}\nWallet: ${balance}"
-        )
-        await interaction.response.edit_message(embed=embed, view=self)
 
 class GameView(ui.View):
     def __init__(self, cog, user, bet, thread, deck, player_hand, dealer_hand, betting_view):
@@ -53,7 +48,7 @@ class GameView(ui.View):
     async def stand(self, button, interaction: Interaction):
         await self.cog.dealer_play(self, interaction)
 
-class Blackjack(commands.Cog):
+class Blackjack(BettingGameCog, commands.Cog):
 
     def hand_to_images(self, hand):
         # Loads card images using card.image property (handles face down)
@@ -92,13 +87,6 @@ class Blackjack(commands.Cog):
                 start_x += img_w + 10
             start_y += img_h + 15
         return bg
-    def __init__(self, client: commands.Bot):
-        self.client = client
-        from modules.economy import Economy
-        from modules.helpers import DEFAULT_BET
-        self.economy = Economy()
-        self.active_games = {}  # {thread_id: BettingView}
-        self.default_bet = DEFAULT_BET
     async def end_game_by_thread(self, thread_id):
         view = self.active_games.pop(thread_id, None)
         if view:
@@ -160,48 +148,36 @@ class Blackjack(commands.Cog):
         balance = self.economy.get_entry(interaction.user.id)[1]
         bet = min(self.default_bet, balance) if balance > 0 else 1
         view = BettingView(self, interaction.user, bet, thread)
-        embed = make_embed(
-            title="Set your bet",
-            description=f"Current bet: ${bet}\nWallet: ${balance}"
-        )
+        embed = view.bet_embed()
         msg = await thread.send(embed=embed, view=view)
         view.bet_message = msg
 
     async def start_game(self, betting_view: BettingView, interaction: Interaction):
-        # Check for sufficient funds before starting
-        balance = self.economy.get_entry(betting_view.user.id)[1]
-        if betting_view.bet > balance:
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"You do not have enough money to place this bet! (You have ${balance}, bet is ${betting_view.bet})",
-                        ephemeral=True
-                    )
-            except Exception as e:
-                print(f"[Blackjack] Error sending not enough money message: {e}")
+        ready = await self.prepare_bet_round(
+            betting_view,
+            interaction,
+            "You do not have enough money to place this bet! (You have ${balance}, bet is ${bet})"
+        )
+        if not ready:
             return
-        # Subtract bet at game start
-        self.economy.add_money(betting_view.user.id, -betting_view.bet)
-        # Update betting message to show new balance after bet is subtracted
-        if betting_view.bet_message:
-            balance = self.economy.get_entry(betting_view.user.id)[1]
-            bet_embed = make_embed(
-                title="Set your bet",
-                description=f"Current bet: ${betting_view.bet}\nWallet: ${balance}"
-            )
-            await betting_view.bet_message.edit(embed=bet_embed, view=betting_view)
-        # Delete old game message if it exists
-        if betting_view.game_message:
-            try:
-                await betting_view.game_message.delete()
-            except Exception:
-                pass
-        # Deal new game
-        deck = [Card(suit, num, down=False) for num in range(2,15) for suit in Card.suits]
+        deck = [
+            Card(suit, value, down=False)
+            for value in range(2, 15)
+            for suit in Card.suits
+        ]
         random.shuffle(deck)
         player_hand = [deck.pop(), deck.pop()]
         dealer_hand = [deck.pop(), deck.pop().flip()]
-        game_view = GameView(self, betting_view.user, betting_view.bet, betting_view.thread, deck, player_hand, dealer_hand, betting_view)
+        game_view = GameView(
+            self,
+            betting_view.user,
+            betting_view.bet,
+            betting_view.thread,
+            deck,
+            player_hand,
+            dealer_hand,
+            betting_view,
+        )
         msg = await self.send_game_message(game_view, "Your Turn", player_hand, dealer_hand)
         betting_view.game_message = msg
         game_view.game_message = msg

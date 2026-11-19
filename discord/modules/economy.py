@@ -23,14 +23,59 @@ class Economy:
             cls._instance._initialized = False
         return cls._instance
 
+    def _commit(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            result = func(self, *args, **kwargs)
+            self.conn.commit()
+            return result
+        return wrapper
+
     def __init__(self):
         if getattr(self, '_initialized', False):
             return
+        self.casino_user_id = CASINO_USER_ID
         self.open()
-        # Ensure casino entry exists
-        if not self.get_entry(CASINO_USER_ID):
-            self.set_money(CASINO_USER_ID, CASINO_START_BALANCE)
+        self._ensure_casino_entry()
         self._initialized = True
+
+    def _ensure_casino_entry(self):
+        self.cur.execute(
+            "SELECT user_id FROM economy WHERE user_id=?",
+            (self.casino_user_id,)
+        )
+        if self.cur.fetchone() is None:
+            self.cur.execute(
+                "INSERT INTO economy(user_id, money, credits) VALUES(?,?,?)",
+                (self.casino_user_id, CASINO_START_BALANCE, 0)
+            )
+            self.conn.commit()
+
+    @_commit
+    def bind_casino_user(self, user_id: int) -> Entry:
+        """Bind casino funds to the authenticated bot user."""
+        if user_id == self.casino_user_id:
+            return self.get_entry(user_id)
+
+        old_user_id = self.casino_user_id
+        self.cur.execute(
+            "SELECT * FROM economy WHERE user_id=?",
+            (user_id,)
+        )
+        bot_entry = self.cur.fetchone()
+        if bot_entry is None:
+            self.cur.execute(
+                "UPDATE economy SET user_id=? WHERE user_id=?",
+                (user_id, old_user_id)
+            )
+        else:
+            self.cur.execute(
+                "DELETE FROM economy WHERE user_id=?",
+                (old_user_id,)
+            )
+        self.casino_user_id = user_id
+        self._ensure_casino_entry()
+        return self.get_entry(user_id)
 
     def open(self):
         """Initializes the database"""
@@ -50,14 +95,6 @@ class Economy:
             self.conn.commit()
             self.cur.close()
             self.conn.close()
-
-    def _commit(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            result = func(self, *args, **kwargs)
-            self.conn.commit()
-            return result
-        return wrapper
 
     def get_entry(self, user_id: int) -> Entry:
         self.cur.execute(
@@ -105,9 +142,9 @@ class Economy:
     @_commit
     def add_money(self, user_id: int, money_to_add: int) -> Entry:
         # If not casino, transfer to/from casino
-        if user_id != CASINO_USER_ID:
+        if user_id != self.casino_user_id:
             # Player loses money, casino gains it
-            self.add_money(CASINO_USER_ID, -money_to_add)
+            self.add_money(self.casino_user_id, -money_to_add)
         money = self.get_entry(user_id)[1]
         total = money + money_to_add
         if total < 0:

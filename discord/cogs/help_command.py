@@ -31,12 +31,12 @@ class Help(commands.Cog, name='help'):
         )
         embed.add_field(
             name="/coinflip",
-            value="Flip a coin and bet on heads or tails. Set your bet, then choose your side.",
+            value="Flip a coin and bet on heads or tails, or challenge another user with /coinflip @user bet.",
             inline=False
         )
         embed.add_field(
             name="/diceroll",
-            value="Roll a die and bet on the outcome (1-6). Set your bet, then guess the result.",
+            value="Roll a die and bet on the outcome (1-6), or challenge another user with /diceroll @user bet.",
             inline=False
         )
         embed.add_field(

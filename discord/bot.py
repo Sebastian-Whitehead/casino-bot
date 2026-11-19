@@ -51,6 +51,7 @@ USE_TEST_GUILD = True  # Set to True for fast test registration
 async def on_ready() -> None:
     """Bot startup event."""
     logger.info(f'Logged in as {client.user}')
+    Economy().bind_casino_user(client.user.id)
     # Start background task for auto-deleting dormant threads
     if ENABLE_AUTO_THREAD_CLEANUP:
         setup_auto_thread_cleanup(client)
@@ -84,7 +85,7 @@ async def cleanup_threads(interaction: discord.Interaction) -> None:
 
 
 # --- Casino balance command (DB-backed) ---
-from modules.economy import Economy, CASINO_USER_ID
+from modules.economy import Economy
 
 
 @client.slash_command(
@@ -101,8 +102,7 @@ async def casino_balance(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Casino balance tracking is disabled in config.", ephemeral=True)
         return
     econ = Economy()
-    casino_entry = econ.get_entry(CASINO_USER_ID)
-    casino_balance = casino_entry[1] if casino_entry else 0
+    casino_balance = econ.get_entry(econ.casino_user_id)[1]
     await interaction.response.send_message(f"Casino balance: ${casino_balance}", ephemeral=True)
 
 
@@ -124,9 +124,8 @@ async def add_casino_money(interaction: discord.Interaction, amount: int) -> Non
         await interaction.response.send_message("Amount must not be zero.", ephemeral=True)
         return
     econ = Economy()
-    econ.add_money(CASINO_USER_ID, amount)
-    casino_entry = econ.get_entry(CASINO_USER_ID)
-    casino_balance = casino_entry[1] if casino_entry else 0
+    econ.add_money(econ.casino_user_id, amount)
+    casino_balance = econ.get_entry(econ.casino_user_id)[1]
     await interaction.response.send_message(f"Added ${amount} to the casino. New balance: ${casino_balance}", ephemeral=True)
 
 

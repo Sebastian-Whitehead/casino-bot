@@ -1,6 +1,11 @@
 from nextcord import ui, Interaction, ButtonStyle
+from modules.helpers import make_embed
 
 class BaseBettingView(ui.View):
+    balance_index = 1
+    bet_title = "Set your bet ($)"
+    currency_name = "cash"
+
     def __init__(self, cog, user, bet, thread):
         super().__init__(timeout=None)
         self.cog = cog
@@ -11,9 +16,23 @@ class BaseBettingView(ui.View):
         self.game_message = None
 
     def cap_bet(self, new_bet: int) -> int:
-        # Assumes balance is at index 1 or 2; override if needed
-        balance = self.cog.economy.get_entry(self.user.id)[1]
+        balance = self.cog.economy.get_entry(self.user.id)[self.balance_index]
         return max(1, min(new_bet, balance))
+
+    def get_balance(self):
+        return self.cog.economy.get_entry(self.user.id)[self.balance_index]
+
+    def bet_embed(self):
+        balance = self.get_balance()
+        if self.currency_name == "credits":
+            description = f"Current bet: {self.bet} credits\nWallet: {balance} credits"
+        else:
+            description = f"Current bet: ${self.bet}\nWallet: ${balance}"
+        return make_embed(title=self.bet_title, description=description)
+
+    async def refresh_bet_message(self):
+        if self.bet_message:
+            await self.bet_message.edit(embed=self.bet_embed(), view=self)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         return interaction.user.id == self.user.id
@@ -69,5 +88,4 @@ class BaseBettingView(ui.View):
             pass
 
     async def update_bet_message(self, interaction):
-        # This should be overridden in child classes for custom embed
-        pass
+        await interaction.response.edit_message(embed=self.bet_embed(), view=self)
