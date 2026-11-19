@@ -185,7 +185,7 @@ class BaseGameCog(BettingGameCog):
         """Step 5. Pays once per game id; a repeated settle for the same game does nothing."""
         game_id = game_id or view.game_id
         user_id = view.user.id
-        if not self.economy.settle_wager(game_id, user_id, outcome.payout):
+        if not self.economy.settle_game(game_id, {user_id: outcome.payout}):  # also writes game_log
             return
         net = outcome.payout - view.bet
         wallet = self.economy.get_chips(user_id)

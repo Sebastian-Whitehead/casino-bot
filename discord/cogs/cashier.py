@@ -5,7 +5,7 @@ from nextcord.ext import commands
 from modules.economy import Economy
 from modules.game_ui import ensure_casino_channel, format_chips
 from modules.helpers import (
-    CHIP_VALUE, TEST_GUILD_ID,
+    CHIP_VALUE, TEST_GUILD_ID, TEST_MODE,
     InsufficientFundsException, make_embed,
 )
 
@@ -32,7 +32,8 @@ def do_cash_out(economy, uid: int, n: int):
 
 
 def balances_text(economy, uid: int) -> str:
-    return f"Bank: ${economy.bank.balance(uid):,}\nWallet: {format_chips(economy.get_chips(uid))}"
+    bank = "unlimited (test mode)" if TEST_MODE else f"${economy.bank.balance(uid):,}"
+    return f"Bank: {bank}\nWallet: {format_chips(economy.get_chips(uid))}"
 
 
 class CashierView(ui.View):

@@ -43,3 +43,10 @@ class FakeEconomy:
 
     def open_count(self):
         return sum(1 for w in self.wagers.values() if w["status"] == "open")
+
+    def settle_game(self, game_id, payouts):
+        if any(self.wagers[(game_id, uid)]["status"] != "open" for uid in payouts):
+            return False
+        for uid, payout in payouts.items():
+            self._close(game_id, uid, "settled", payout)
+        return True

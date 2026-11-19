@@ -155,10 +155,15 @@ class ChallengeGameCog(BaseGameCog):
             else 0
         )
         payout = pot - fee
-        self.economy.settle_wager(challenge.game_id, winner.id, payout)
-        self.economy.settle_wager(challenge.game_id, loser.id, 0)
+        self.economy.settle_game(challenge.game_id, {winner.id: payout, loser.id: 0})
         return payout, fee
 
+    def tie_challenge(self, challenge):
+        """A tie is a resolution (logged as a push): both stakes go back."""
+        self.economy.settle_game(challenge.game_id,
+                                 {challenge.challenger.id: challenge.bet, challenge.opponent.id: challenge.bet})
+
     def refund_challenge(self, challenge):
+        """Cancel after a failure: stakes go back and nothing is logged as a game."""
         for player in (challenge.challenger, challenge.opponent):
             self.economy.refund_wager(challenge.game_id, player.id)

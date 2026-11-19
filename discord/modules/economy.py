@@ -7,14 +7,12 @@ from modules.bank import LocalBank
 from modules.helpers import CASINO_USER_ID, CHIP_VALUE, InsufficientFundsException
 
 
-Entry = Tuple[int, int, int]
-
-CASINO_START_BALANCE = 100000
+Entry = Tuple[int, int]  # (user_id, chips)
 
 
 class Economy:
     def get_all_entries(self) -> List[Entry]:
-        """Return all entries in the economy table as a list of (user_id, money, credits)."""
+        """Return all entries in the economy table as a list of (user_id, chips)."""
         self.cur.execute("SELECT * FROM economy")
         return self.cur.fetchall()
     """A wrapper for the economy database (Singleton)"""
@@ -39,27 +37,38 @@ class Economy:
         self.casino_user_id = CASINO_USER_ID
         self.open()
         self.bank = LocalBank(self)
-        self._migrate_cash_wipe()
+        self._migrate_restructure()
         self._ensure_casino_entry()
         self._initialized = True
 
-    def _migrate_cash_wipe(self):
-        """One-time (PRAGMA user_version 0 -> 1): back up the db, zero all money, reset casino money."""
-        if self.cur.execute("PRAGMA user_version").fetchone()[0] >= 1:
+    def _migrate_restructure(self):
+        """One-time (PRAGMA user_version < 2; version 2 only renames credits to chips): the economy table becomes just (user_id, chips).
+        Everything in the old table is wiped (a backup copy of the file is kept) and open wagers are dropped,
+        since the stakes they refer to are gone."""
+        version = self.cur.execute("PRAGMA user_version").fetchone()[0]
+        if version == 2:  # already restructured, the column was still called credits
+            self.cur.execute("ALTER TABLE economy RENAME COLUMN credits TO chips")
+            self.cur.execute("PRAGMA user_version=3")
+            self.conn.commit()
             return
-        if self.cur.execute("SELECT COUNT(*) FROM economy").fetchone()[0]:
-            if self.db_path != ':memory:':
-                dest = sqlite3.connect(self.db_path + '.pre-chips.bak')
-                with dest:
-                    self.conn.backup(dest)
-                dest.close()
-            self.cur.execute("UPDATE economy SET money=0")
-            self.cur.execute("INSERT OR IGNORE INTO economy(user_id, money, credits) VALUES(?,0,0)",
-                             (self.casino_user_id,))
-            self.cur.execute("UPDATE economy SET money=? WHERE user_id=?",
-                             (CASINO_START_BALANCE, self.casino_user_id))
-        self.cur.execute("PRAGMA user_version=1")
+        if version >= 3:
+            return
+        had_data = self.cur.execute("SELECT COUNT(*) FROM economy").fetchone()[0]
+        if had_data and self.db_path != ':memory:':
+            dest = sqlite3.connect(self.db_path + '.pre-restructure.bak')
+            with dest:
+                self.conn.backup(dest)
+            dest.close()
+        self.cur.execute("DROP TABLE economy")
+        self.cur.execute(self._ECONOMY_SCHEMA)
+        self.cur.execute("DELETE FROM wagers WHERE status='open'")
+        self.cur.execute("PRAGMA user_version=3")
         self.conn.commit()
+
+    _ECONOMY_SCHEMA = """CREATE TABLE economy (
+            user_id INTEGER NOT NULL PRIMARY KEY,
+            chips INTEGER NOT NULL DEFAULT 0
+        )"""
 
     @staticmethod
     def _check(amount):
@@ -67,13 +76,15 @@ class Economy:
             raise ValueError(f"amount must be a positive int, got {amount!r}")
 
     def get_chips(self, user_id: int) -> int:
-        return self.get_entry(user_id)[2]
+        return self.get_entry(user_id)[1]
 
     def _adjust_chips(self, pairs, statements=()):
         """Apply [(uid, delta)] plus extra [(sql, params)] in one transaction."""
         try:
             for uid, delta in pairs:
-                self.cur.execute("UPDATE economy SET credits=credits+? WHERE user_id=?", (delta, uid))
+                # a plain UPDATE would silently drop chips for a user with no row yet
+                self.cur.execute("INSERT OR IGNORE INTO economy(user_id, chips) VALUES(?,0)", (uid,))
+                self.cur.execute("UPDATE economy SET chips=chips+? WHERE user_id=?", (delta, uid))
             for sql, params in statements:
                 self.cur.execute(sql, params)
             self.conn.commit()
@@ -158,6 +169,41 @@ class Economy:
             raise ValueError(f"payout must be a non-negative int, got {payout!r}")
         return self._close_wager(game_id, user_id, 'settled', lambda amount: payout)
 
+    def settle_game(self, game_id: str, payouts: dict) -> bool:
+        """Resolve a whole game in one transaction: pay each player's chips ({user_id: total chips returned,
+        0 on a loss}), close their wagers and write the game_log rows.
+        result (per player): win if paid more than wagered, push if equal, loss if less.
+        winner (same on every row): the winning user id; 'house' if every player lost; 'none' on a push.
+        Returns False, changing nothing, if any wager is already closed (so a retry never pays twice)."""
+        rows = {}
+        for uid, payout in payouts.items():
+            if type(payout) is not int or payout < 0:
+                raise ValueError(f"payout must be a non-negative int, got {payout!r}")
+            row = self.cur.execute("SELECT amount, status, game FROM wagers WHERE game_id=? AND user_id=?",
+                                   (game_id, uid)).fetchone()
+            if row is None:
+                raise KeyError(f"no wager {game_id!r} for user {uid}")
+            if row[1] != 'open':
+                return False
+            rows[uid] = row
+        results = {uid: ('win' if payouts[uid] > amount else 'push' if payouts[uid] == amount else 'loss')
+                   for uid, (amount, _, _) in rows.items()}
+        winners = [uid for uid, r in results.items() if r == 'win']
+        winner = str(winners[0]) if winners else ('house' if all(r == 'loss' for r in results.values()) else 'none')
+        now = time.time()
+        pairs, statements = [], []
+        for uid, (amount, _, game) in rows.items():
+            self.get_entry(uid)
+            if payouts[uid] > 0:
+                pairs += [(self.casino_user_id, -payouts[uid]), (uid, payouts[uid])]
+            statements.append(("UPDATE wagers SET status='settled', payout=?, closed_at=? "
+                               "WHERE game_id=? AND user_id=? AND status='open'", (payouts[uid], now, game_id, uid)))
+            statements.append(("INSERT INTO game_log(game_id, game, user_id, chips_wagered, chips_paid_out, "
+                               "result, winner, resolved_at) VALUES(?,?,?,?,?,?,?,?)",
+                               (game_id, game, uid, amount, payouts[uid], results[uid], winner, now)))
+        self._adjust_chips(pairs, statements)
+        return True
+
     def refund_wager(self, game_id: str, user_id: int) -> bool:
         """Return the stake and close the wager. False if already closed."""
         return self._close_wager(game_id, user_id, 'refunded', lambda amount: amount)
@@ -174,8 +220,8 @@ class Economy:
         )
         if self.cur.fetchone() is None:
             self.cur.execute(
-                "INSERT INTO economy(user_id, money, credits) VALUES(?,?,?)",
-                (self.casino_user_id, CASINO_START_BALANCE, 0)
+                "INSERT INTO economy(user_id, chips) VALUES(?,?)",
+                (self.casino_user_id, 0)
             )
             self.conn.commit()
 
@@ -201,6 +247,7 @@ class Economy:
                 "DELETE FROM economy WHERE user_id=?",
                 (old_user_id,)
             )
+        self.bank.rebind_casino(old_user_id, user_id)
         self.casino_user_id = user_id
         self._ensure_casino_entry()
         return self.get_entry(user_id)
@@ -212,11 +259,7 @@ class Economy:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.cur = self.conn.cursor()
-        self.cur.execute("""CREATE TABLE IF NOT EXISTS economy (
-            user_id INTEGER NOT NULL PRIMARY KEY,
-            money INTEGER NOT NULL DEFAULT 0,
-            credits INTEGER NOT NULL DEFAULT 0
-        )""")
+        self.cur.execute(self._ECONOMY_SCHEMA.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
         # one row per (game, player) stake; status moves open -> settled | refunded exactly once
         self.cur.execute("""CREATE TABLE IF NOT EXISTS wagers (
             game_id TEXT NOT NULL,
@@ -228,6 +271,19 @@ class Economy:
             created_at REAL NOT NULL,
             closed_at REAL,
             PRIMARY KEY (game_id, user_id)
+        )""")
+        # one row per participant per resolved game; `winner` is the same on every row of a game
+        self.cur.execute("""CREATE TABLE IF NOT EXISTS game_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            game TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            chips_wagered INTEGER NOT NULL,
+            chips_paid_out INTEGER NOT NULL,
+            result TEXT NOT NULL,
+            winner TEXT NOT NULL,
+            resolved_at REAL NOT NULL,
+            UNIQUE (game_id, user_id)
         )""")
 
     def close(self):
@@ -250,8 +306,8 @@ class Economy:
     def new_entry(self, user_id: int) -> Entry:
         try:
             self.cur.execute(
-                "INSERT INTO economy(user_id, money, credits) VALUES(?,?,?)",
-                (user_id, 0, 0)
+                "INSERT INTO economy(user_id, chips) VALUES(?,?)",
+                (user_id, 0)
             )
             return self.get_entry(user_id)
         except sqlite3.IntegrityError:
@@ -265,41 +321,18 @@ class Economy:
         )
 
     @_commit
-    def set_money(self, user_id: int, money: int) -> Entry:
+    def set_chips(self, user_id: int, chips: int) -> Entry:
+        self.get_entry(user_id)  # make sure the row exists
         self.cur.execute(
-            "UPDATE economy SET money=? WHERE user_id=?",
-            (money, user_id)
+            "UPDATE economy SET chips=? WHERE user_id=?",
+            (chips, user_id)
         )
         return self.get_entry(user_id)
 
     @_commit
-    def set_credits(self, user_id: int, credits: int) -> Entry:
-        self.cur.execute(
-            "UPDATE economy SET credits=? WHERE user_id=?",
-            (credits, user_id)
-        )
-        return self.get_entry(user_id)
-
-    @_commit
-    def add_money(self, user_id: int, money_to_add: int) -> Entry:
-        # If not casino, transfer to/from casino
-        if user_id != self.casino_user_id:
-            # Player loses money, casino gains it
-            self.add_money(self.casino_user_id, -money_to_add)
-        money = self.get_entry(user_id)[1]
-        total = money + money_to_add
-        if total < 0:
-            total = 0
-        self.set_money(user_id, total)
-        return self.get_entry(user_id)
-
-    @_commit
-    def add_credits(self, user_id: int, credits_to_add: int) -> Entry:
-        credits = self.get_entry(user_id)[2]
-        total = credits + credits_to_add
-        if total < 0:
-            total = 0
-        self.set_credits(user_id, total)
+    def add_chips(self, user_id: int, chips_to_add: int) -> Entry:
+        total = max(0, self.get_entry(user_id)[1] + chips_to_add)
+        self.set_chips(user_id, total)
         return self.get_entry(user_id)
 
     def random_entry(self) -> Entry:
@@ -307,5 +340,5 @@ class Economy:
         return random.choice(self.cur.fetchall())
 
     def top_entries(self, n: int=0) -> List[Entry]:
-        self.cur.execute("SELECT * FROM economy ORDER BY money DESC")
+        self.cur.execute("SELECT * FROM economy ORDER BY chips DESC")
         return (self.cur.fetchmany(n) if n else self.cur.fetchall())

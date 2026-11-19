@@ -52,6 +52,8 @@ async def on_ready() -> None:
     """Bot startup event."""
     logger.info(f'Logged in as {client.user}')
     Economy().bind_casino_user(client.user.id)
+    if TEST_MODE:
+        logger.warning('TEST MODE is ON: every player has infinite bank money. Turn off test_mode in config.yml for real play.')
     refunded = Economy().refund_open_wagers()  # games from the previous run died with it
     if refunded:
         logger.info(f'Refunded {refunded} open wager(s) left by the previous run')
@@ -104,8 +106,9 @@ async def casino_balance(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Casino balance tracking is disabled in config.", ephemeral=True)
         return
     econ = Economy()
-    casino_balance = econ.get_entry(econ.casino_user_id)[1]
-    await interaction.response.send_message(f"Casino balance: ${casino_balance}", ephemeral=True)
+    await interaction.response.send_message(
+        f"Casino bank: ${econ.bank.balance(econ.casino_user_id):,}\n"
+        f"Casino chips: {econ.get_chips(econ.casino_user_id):,}", ephemeral=True)
 
 
 # --- Add money to casino (owner only) ---
@@ -125,9 +128,10 @@ async def add_casino_money(interaction: discord.Interaction, amount: int) -> Non
         await interaction.response.send_message("Amount must not be zero.", ephemeral=True)
         return
     econ = Economy()
-    econ.add_money(econ.casino_user_id, amount)
-    casino_balance = econ.get_entry(econ.casino_user_id)[1]
-    await interaction.response.send_message(f"Added ${amount} to the casino. New balance: ${casino_balance}", ephemeral=True)
+    cid = econ.casino_user_id
+    econ.bank.set_balance(cid, econ.bank.balance(cid) + amount)
+    await interaction.response.send_message(
+        f"Added ${amount} to the casino bank. New balance: ${econ.bank.balance(cid):,}", ephemeral=True)
 
 
 

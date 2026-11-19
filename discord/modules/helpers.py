@@ -51,6 +51,7 @@ RESTRICT_TO_CASINO_CHANNEL = config.get('restrict_to_casino_channel', True)
 CHALLENGE_FEE_ENABLED = config.get('challenge_fee_enabled', True)
 CHALLENGE_FEE_PERCENT = config.get('challenge_fee_percent', 5)
 CONFIRM_BETS = config.get('confirm_bets', True)
+TEST_MODE = config.get('test_mode', False)  # infinite bank money; see config.yml.example
 
 
 def payout(bet: int, mult) -> int:

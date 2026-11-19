@@ -78,7 +78,7 @@ class Roller(ChallengeGameCog, commands.Cog):
         challenger_roll = random.randint(1, 6)
         opponent_roll = random.randint(1, 6)
         if challenger_roll == opponent_roll:
-            self.refund_challenge(challenge)
+            self.tie_challenge(challenge)
             message = render_embed("dice_challenge_tie",
                                    challenge.replacements(**{"{roll}": challenger_roll}))
         else:

@@ -27,7 +27,7 @@ def make_cog(cls):
 def user(uid, chips):
     eco = Economy()
     eco.get_entry(uid)
-    eco.set_credits(uid, chips)
+    eco.set_chips(uid, chips)
     return SimpleNamespace(id=uid, bot=False, mention=f"<@{uid}>", display_name=str(uid))
 
 

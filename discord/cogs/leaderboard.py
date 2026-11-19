@@ -16,14 +16,14 @@ class Leaderboard(commands.Cog):
             return
         from modules.economy import Economy
         econ = Economy()
-        # entries are (user_id, money, chips); the casino account is excluded
+        # entries are (user_id, chips); the casino account is excluded
         filtered = [e for e in econ.get_all_entries() if e[0] != econ.casino_user_id]
-        top = sorted(filtered, key=lambda x: x[2], reverse=True)[:10]
+        top = sorted(filtered, key=lambda x: x[1], reverse=True)[:10]
         if not top:
             await interaction.response.send_message("No users found in the casino database.", ephemeral=True)
             return
         lines = []
-        for i, (user_id, money, chips) in enumerate(top, 1):
+        for i, (user_id, chips) in enumerate(top, 1):
             try:
                 user = await self.client.fetch_user(user_id)
                 name = user.display_name if user else str(user_id)

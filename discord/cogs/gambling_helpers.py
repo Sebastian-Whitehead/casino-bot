@@ -38,9 +38,9 @@ class GamblingHelpers(commands.Cog, name='General'):
         if user_id is None:
             return
         if money is not None:
-            self.economy.set_money(user_id, money)
+            self.economy.bank.set_balance(user_id, money)  # bank money lives in the bank, not the economy table
         if chips is not None:
-            self.economy.set_credits(user_id, chips)  # chips live in the credits column
+            self.economy.set_chips(user_id, chips)
 
     @commands.command(
         brief="Gives you your bonus once every set cooldown hours.",
@@ -62,8 +62,9 @@ class GamblingHelpers(commands.Cog, name='General'):
         aliases=["top"]
     )
     async def leaderboard(self, ctx):
-        entries = [e for e in self.economy.get_all_entries() if e[0] != self.economy.casino_user_id]
-        entries = sorted(entries, key=lambda e: e[1] + e[2] * CHIP_VALUE, reverse=True)[:5]
+        rows = [(uid, self.economy.bank.balance(uid), chips)
+                for uid, chips in self.economy.get_all_entries() if uid != self.economy.casino_user_id]
+        entries = sorted(rows, key=lambda r: r[1] + r[2] * CHIP_VALUE, reverse=True)[:5]
         embed = make_embed(title='Leaderboard (chips + bank money):', color=discord.Color.gold())
         for i, (uid, money, chips) in enumerate(entries):
             user = self.client.get_user(uid)
