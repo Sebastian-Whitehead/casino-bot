@@ -46,12 +46,13 @@ class CashierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     async def test_insufficient_buy_changes_nothing(self):
-        self.eco.bank.set_balance(UID, 25)
+        short = 3 * CHIP_VALUE - 1  # one dollar short of 3 chips, whatever chip_value is
+        self.eco.bank.set_balance(UID, short)
         view = cashier.CashierView(SimpleNamespace(id=UID), self.eco)
         view.quantity = 3
         i = FakeInteraction()
         await view.confirm.callback(i)
-        self.assertEqual((self.eco.bank.balance(UID), self.eco.get_chips(UID)), (25, 0))
+        self.assertEqual((self.eco.bank.balance(UID), self.eco.get_chips(UID)), (short, 0))
         self.assertFalse(view.done)
         self.assertIn("Insufficient funds", i.edits[-1]["embed"].description)
 

@@ -1,10 +1,11 @@
+import os
 import random
 import sqlite3
 import time
 from functools import wraps
 from typing import Tuple, List
 from modules import helpers
-from modules.bank import LocalBank
+from modules.bank import LocalBank, SupabaseBank
 from modules.helpers import CASINO_USER_ID, CHIP_VALUE, InsufficientFundsException
 
 
@@ -46,7 +47,9 @@ class Economy:
             return
         self.casino_user_id = CASINO_USER_ID
         self.open()
-        self.bank = LocalBank(self)
+        # the tests always set ECONOMY_DB_PATH: they must never touch the live Supabase bank
+        url = os.environ.get('SUPABASE_DATABASE_URL') or helpers.config.get('supabase_database_url')
+        self.bank = SupabaseBank(url) if url and not os.environ.get('ECONOMY_DB_PATH') else LocalBank(self)
         self._migrate_restructure()
         self._ensure_casino_entry()
         self._initialized = True
@@ -114,6 +117,17 @@ class Economy:
             self.bank.deposit(user_id, price)
             raise
         return True
+
+    def reconcile(self):
+        """Chips exist only by being bought or cashed out, so every chip (players' and the casino's) must be backed by
+        CHIP_VALUE of bank money taken in. Returns (chips, expected_cents, actual_cents, drift_cents), or None when the
+        bank has no ledger (LocalBank). drift != 0 means the chip DB and the bank disagree; a past chip_value change also shows as drift."""
+        if not hasattr(self.bank, 'net_chip_money'):
+            return None
+        chips = self.cur.execute("SELECT coalesce(sum(chips), 0) FROM economy").fetchone()[0]
+        expected = chips * CHIP_VALUE * 100
+        actual = self.bank.net_chip_money()
+        return chips, expected, actual, actual - expected
 
     def cash_out(self, user_id: int, n: int) -> None:
         self._check(n)

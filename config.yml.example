@@ -8,6 +8,7 @@ bot:
   test_guild_id: 629027778347532298  # Guild ID for slash command registration/testing
   casino_channel_id: 1409120191534858361 # Channel ID where casino commands are allowed (replace with your channel)
   restrict_to_casino_channel: true # Toggle to restrict casino commands to the casino channel
+  # supabase_database_url: postgresql://... # Supabase session-pooler URL; when set (and ECONOMY_DB_PATH is not), bank money uses economy.accounts
   casino_user_id: 1406929502470410291 # User ID used for the casino's bank/balance (should match the bot's user ID)
 
   # --- Economy/Betting Defaults ---

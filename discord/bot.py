@@ -45,6 +45,19 @@ async def on_thread_delete(thread: discord.Thread):
     logger.info(f"Thread '{thread.name}' (ID: {thread.id}) deleted in channel: {parent_name}")
 
 
+def _log_reconcile() -> None:
+    """Warn when the chips in the local DB are not backed by the bank ledger."""
+    try:
+        r = Economy().reconcile()
+    except Exception:
+        logger.exception('Reconciliation check failed')
+        return
+    if r and r[3]:
+        logger.warning(f'RECONCILE DRIFT: {r[0]} chips expect {r[1]} cents, bank ledger has {r[2]} (drift {r[3]:+d} cents)')
+    elif r:
+        logger.info(f'Reconciled: {r[0]} chips backed by {r[2]} cents')
+
+
 @client.event
 async def on_ready() -> None:
     """Bot startup event."""
@@ -55,6 +68,7 @@ async def on_ready() -> None:
     refunded = Economy().refund_open_wagers()  # games from the previous run died with it
     if refunded:
         logger.info(f'Refunded {refunded} open wager(s) left by the previous run')
+    _log_reconcile()
     # Start background task for auto-deleting dormant threads
     if ENABLE_AUTO_THREAD_CLEANUP:
         setup_auto_thread_cleanup(client)
@@ -89,6 +103,31 @@ async def cleanup_threads(interaction: discord.Interaction) -> None:
 
 # --- Casino balance command (DB-backed) ---
 from modules.economy import Economy
+
+
+@client.slash_command(
+    description="Check that all chips are backed by bank money (owner only)",
+    **GUILD_KW
+)
+async def reconcile(interaction: discord.Interaction) -> None:
+    """Slash command: compare chips in the local DB with the bank ledger (owner only)."""
+    if not _is_owner(interaction):
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    try:
+        r = Economy().reconcile()
+    except Exception:
+        logger.exception('Reconciliation check failed')
+        await interaction.response.send_message("Reconciliation failed; see the bot log.", ephemeral=True)
+        return
+    if r is None:
+        await interaction.response.send_message("The local bank has no ledger to reconcile against.", ephemeral=True)
+        return
+    chips, expected, actual, drift = r
+    status = "✅ Balanced" if drift == 0 else f"⚠️ Drift {drift / 100:+,.2f}"
+    await interaction.response.send_message(
+        f"{status}\nChips in circulation: {chips:,}\nBacking expected: ${expected / 100:,.2f}\n"
+        f"Bank ledger (buys - cash-outs): ${actual / 100:,.2f}", ephemeral=True)
 
 
 @client.slash_command(

@@ -331,3 +331,21 @@ class EconomyTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReconcileTests(unittest.TestCase):
+    def setUp(self):
+        self.eco = fresh(os.path.join(tempfile.mkdtemp(), 'r.db'))
+        self.eco.set_chips(U, 7)
+        self.eco.set_chips(222, 3)
+
+    def test_local_bank_has_no_ledger(self):
+        self.assertIsNone(self.eco.reconcile())
+
+    def test_balanced_and_drift(self):
+        from types import SimpleNamespace
+        backed = 10 * CHIP_VALUE * 100
+        self.eco.bank = SimpleNamespace(net_chip_money=lambda: backed)
+        self.assertEqual(self.eco.reconcile(), (10, backed, backed, 0))
+        self.eco.bank = SimpleNamespace(net_chip_money=lambda: backed - 500)
+        self.assertEqual(self.eco.reconcile()[3], -500)

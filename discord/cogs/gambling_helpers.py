@@ -13,7 +13,7 @@ def claim_bonus(economy, user_id: int, now: float = None):
     row = economy.cur.execute("SELECT ts FROM bonus_claims WHERE user_id=?", (user_id,)).fetchone()
     if row and now - row[0] < B_COOLDOWN * 3600:
         return False, int(B_COOLDOWN * 3600 - (now - row[0])), amount
-    if not economy.bank.deposit(user_id, amount):  # casino cannot pay: no claim recorded
+    if not economy.bank.deposit(user_id, amount, "reward"):  # casino cannot pay: no claim recorded
         return False, 0, amount
     economy.cur.execute("INSERT OR REPLACE INTO bonus_claims(user_id, ts) VALUES(?,?)", (user_id, now))
     economy.conn.commit()
