@@ -349,3 +349,56 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(self.eco.reconcile(), (10, backed, backed, 0))
         self.eco.bank = SimpleNamespace(net_chip_money=lambda: backed - 500)
         self.assertEqual(self.eco.reconcile()[3], -500)
+
+
+class ForceCashOutTests(unittest.TestCase):
+    def setUp(self):
+        self.eco = fresh(os.path.join(tempfile.mkdtemp(), 'c.db'))
+        self.eco.bank.set_balance(self.eco.casino_user_id, 100000)
+        self.eco.set_chips(U, 4)
+        self.eco.set_chips(222, 6)
+
+    def test_sells_all_chips_of_one_player_only(self):
+        self.assertEqual(self.eco.force_cash_out(U), 4)
+        self.assertEqual((self.eco.get_chips(U), self.eco.get_chips(222)), (0, 6))
+        self.assertEqual(self.eco.bank.balance(U), 4 * CHIP_VALUE)
+
+    def test_open_wager_is_refunded_then_sold(self):
+        self.eco.open_wager('g1', U, 'coinflip', 3)  # 3 of the 4 chips are held by a game
+        self.assertEqual(self.eco.force_cash_out(U), 4)
+        self.assertEqual(self.eco.bank.balance(U), 4 * CHIP_VALUE)
+
+    def test_casino_cannot_pay_changes_nothing(self):
+        self.eco.bank.set_balance(self.eco.casino_user_id, 0)
+        with self.assertRaises(InsufficientFundsException):
+            self.eco.force_cash_out(U)
+        self.assertEqual(self.eco.get_chips(U), 4)
+
+    def test_refuses_the_casino(self):
+        with self.assertRaises(ValueError):
+            self.eco.force_cash_out(self.eco.casino_user_id)
+
+
+class BackupTests(unittest.TestCase):
+    def setUp(self):
+        self.eco = fresh(os.path.join(tempfile.mkdtemp(), 'b.db'))
+        self.eco.set_chips(U, 9)
+
+    def test_snapshot_is_a_valid_copy(self):
+        path = os.path.join(tempfile.mkdtemp(), 'copy.db')
+        with open(path, 'wb') as f:
+            f.write(self.eco.snapshot())
+        c = sqlite3.connect(path)
+        self.assertEqual(c.execute("SELECT chips FROM economy WHERE user_id=?", (U,)).fetchone()[0], 9)
+        c.close()
+
+    def test_backup_uploads_snapshot_when_supabase(self):
+        from types import SimpleNamespace
+        got = {}
+        self.eco.bank = SimpleNamespace(save_backup=lambda data, label, keep, age: got.update(n=len(data), keep=keep, age=age) or {'id': 1})
+        self.assertEqual(self.eco.backup_to_supabase(3, 48), {'id': 1})
+        self.assertGreater(got['n'], 0)
+        self.assertEqual((got['keep'], got['age']), (3, 48))
+
+    def test_local_bank_skips_backup(self):
+        self.assertIsNone(self.eco.backup_to_supabase(3, 48))

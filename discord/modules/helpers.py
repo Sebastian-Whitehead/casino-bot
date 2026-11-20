@@ -34,6 +34,9 @@ GUILD_KW = {"guild_ids": [TEST_GUILD_ID]} if USE_TEST_GUILD else {}
 CASINO_CHANNEL_ID = config.get('casino_channel_id')
 THREAD_TIMEOUT_MINUTES = config_raw.get('thread_timeout_minutes', 60)
 THREAD_CLEANUP_CHECK_SECONDS = config_raw.get('thread_cleanup_check_seconds', 60)
+BACKUP_INTERVAL_HOURS = config_raw.get('backup_interval_hours', 12)  # 0 disables
+BACKUP_KEEP = config_raw.get('backup_keep', 3)
+BACKUP_MAX_AGE_HOURS = config_raw.get('backup_max_age_hours', 48)
 
 COINFLIP_MULT = config.get('coinflip_multiplier', 2)
 BLACKJACK_MULT = config.get('blackjack_multiplier', 2)

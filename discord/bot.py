@@ -7,6 +7,7 @@ import logging
 # --- Auto-delete dormant threads in a specific channel ---
 ENABLE_AUTO_THREAD_CLEANUP = True  # Toggle this to enable/disable auto thread cleanup
 from modules.auto_thread_cleanup import setup_auto_thread_cleanup, run_thread_cleanup
+from modules.backup import setup_backups
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -72,6 +73,7 @@ async def on_ready() -> None:
     # Start background task for auto-deleting dormant threads
     if ENABLE_AUTO_THREAD_CLEANUP:
         setup_auto_thread_cleanup(client)
+    setup_backups(client)
 
 def _is_owner(interaction: discord.Interaction) -> bool:
     """Check if the user is a bot owner."""
@@ -103,6 +105,37 @@ async def cleanup_threads(interaction: discord.Interaction) -> None:
 
 # --- Casino balance command (DB-backed) ---
 from modules.economy import Economy
+
+
+@client.slash_command(
+    description="Force-sell ALL of one player's chips back to their bank account (owner only)",
+    **GUILD_KW
+)
+async def force_cash_out(interaction: discord.Interaction, user_id: str, confirm: bool = False) -> None:
+    """Owner only, for a player who lost access to their account. user_id is text because snowflakes exceed slash-command ints.
+    Without confirm it only previews."""
+    if not _is_owner(interaction):
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    if not user_id.strip().isdigit():
+        await interaction.response.send_message("user_id must be a Discord user ID (digits only).", ephemeral=True)
+        return
+    uid = int(user_id)
+    econ = Economy()
+    chips = econ.get_chips(uid)
+    if not confirm:
+        await interaction.response.send_message(
+            f"<@{uid}> holds {chips:,} chips (${chips * CHIP_VALUE:,}). Run again with confirm=True to sell them all.", ephemeral=True)
+        return
+    try:
+        sold = econ.force_cash_out(uid)
+    except (InsufficientFundsException, ValueError) as e:
+        logger.warning(f'force_cash_out by {interaction.user.id} for {uid} failed: {e!r}')
+        await interaction.response.send_message(
+            "Nothing changed: the player has no linked bank account, or the casino cannot pay that out right now.", ephemeral=True)
+        return
+    logger.warning(f'force_cash_out by {interaction.user.id}: sold {sold} chips for {uid} (${sold * CHIP_VALUE})')
+    await interaction.response.send_message(f"Sold {sold:,} chips for <@{uid}>: ${sold * CHIP_VALUE:,} paid to their bank account.", ephemeral=True)
 
 
 @client.slash_command(

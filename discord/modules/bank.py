@@ -193,6 +193,13 @@ class SupabaseBank(Bank):
             return _valid(amount)
         return self._move(uid, amount, False, kind)
 
+    def save_backup(self, data: bytes, label: str, keep: int, max_age_hours: int) -> dict:
+        """Store a snapshot of the local chips DB in Supabase and prune old ones; see sql/003_casino_backups.sql."""
+        def q(cur):
+            cur.execute("SELECT public.fab_casino_save_backup(%s, %s, %s, %s)", (data, label, keep, max_age_hours))
+            return cur.fetchone()[0]
+        return self._run(q)
+
     def net_chip_money(self) -> int:
         """Cents the casino took in from chip buys minus cash-outs (bonuses excluded); see sql/002_fab_casino_chip_ledger.sql."""
         def q(cur):

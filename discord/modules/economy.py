@@ -1,6 +1,7 @@
 import os
 import random
 import sqlite3
+import tempfile
 import time
 from functools import wraps
 from typing import Tuple, List
@@ -118,6 +119,27 @@ class Economy:
             raise
         return True
 
+    def snapshot(self) -> bytes:
+        """Consistent copy of the whole SQLite file (sqlite backup API), as bytes."""
+        fd, tmp = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+        try:
+            dest = sqlite3.connect(tmp)
+            with dest:
+                self.conn.backup(dest)
+            dest.close()
+            with open(tmp, 'rb') as f:
+                return f.read()
+        finally:
+            os.remove(tmp)
+
+    def backup_to_supabase(self, keep: int, max_age_hours: int):
+        """Upload a snapshot (the Supabase bank prunes old ones). None when the bank is not Supabase."""
+        if not hasattr(self.bank, 'save_backup'):
+            return None
+        label = f"{os.path.basename(self.db_path)} {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        return self.bank.save_backup(self.snapshot(), label, keep, max_age_hours)
+
     def reconcile(self):
         """Chips exist only by being bought or cashed out, so every chip (players' and the casino's) must be backed by
         CHIP_VALUE of bank money taken in. Returns (chips, expected_cents, actual_cents, drift_cents), or None when the
@@ -225,6 +247,19 @@ class Economy:
         """Refund every still-open wager (their games died with the previous process). Returns the count."""
         rows = self.cur.execute("SELECT game_id, user_id FROM wagers WHERE status='open'").fetchall()
         return sum(self.refund_wager(g, u) for g, u in rows)
+
+    def force_cash_out(self, user_id: int) -> int:
+        """Admin recovery (player lost access to their account): refund the player's open wagers, then cash ALL their chips
+        out to their bank account. Returns the chips sold. Raises InsufficientFundsException if the bank refuses
+        (casino cannot pay, or no linked bank account); the chips then stay untouched."""
+        if user_id == self.casino_user_id:
+            raise ValueError("refusing to cash out the casino's own chips")
+        for game_id, uid in self.cur.execute("SELECT game_id, user_id FROM wagers WHERE status='open' AND user_id=?", (user_id,)).fetchall():
+            self.refund_wager(game_id, uid)
+        chips = self.get_chips(user_id)
+        if chips > 0:
+            self.cash_out(user_id, chips)
+        return chips
 
     def _ensure_casino_entry(self):
         self.cur.execute(

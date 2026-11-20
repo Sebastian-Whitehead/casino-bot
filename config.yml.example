@@ -40,3 +40,8 @@ bot:
 # --- Thread/Channel Cleanup ---
 thread_timeout_minutes: 10 # Threads older than this (minutes) will be deleted by cleanup
 thread_cleanup_check_seconds: 180 # How often to check for expired threads (seconds)
+
+# --- Backups of the local chips DB (economy.db) to Supabase (needs supabase_database_url) ---
+backup_interval_hours: 12 # How often to upload a snapshot; 0 disables backups
+backup_keep: 3 # Keep at most this many snapshots in Supabase
+backup_max_age_hours: 48 # Also delete snapshots older than this (the newest is always kept)
